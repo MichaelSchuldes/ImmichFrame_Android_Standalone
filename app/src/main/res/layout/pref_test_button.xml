@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnTestConnection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clickable="false"
+        android:focusable="false"
+        android:duplicateParentState="true"
+        android:text="Test Immich Connection"
+        android:textColor="@color/white"
+        app:backgroundTint="@color/purple_700"
+        app:cornerRadius="12dp"
+        app:icon="@android:drawable/ic_dialog_info"
+        app:iconGravity="textStart"
+        app:iconTint="@color/white"
+        tools:ignore="HardcodedText" />
+</FrameLayout>

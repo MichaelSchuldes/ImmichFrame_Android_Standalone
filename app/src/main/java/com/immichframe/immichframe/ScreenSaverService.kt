@@ -3,7 +3,6 @@ package com.immichframe.immichframe
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Handler
@@ -16,90 +15,65 @@ import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
-import androidx.preference.PreferenceManager
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.toColorInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import retrofit2.Retrofit
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import androidx.core.graphics.toColorInt
-import androidx.core.graphics.drawable.toDrawable
-import androidx.core.net.toUri
 
 class ScreenSaverService : DreamService() {
-    private var webViewRetryScope: CoroutineScope? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private lateinit var webView: WebView
     private lateinit var imageView1: ImageView
     private lateinit var imageView2: ImageView
     private lateinit var txtPhotoInfo: TextView
     private lateinit var txtDateTime: TextView
-    private lateinit var serverSettings: Helpers.ServerSettings
-    private var retrofit: Retrofit? = null
-    private lateinit var apiService: Helpers.ApiService
-    private var isWeatherTimerRunning = false
-    private var useWebView = true
-    private var blurredBackground = true
-    private var showCurrentDate = true
-    private var currentWeather = ""
+
+    private lateinit var immichManager: ImmichManager
+    private lateinit var currentSettings: ImmichManager.FrameSettings
+
     private var isImageTimerRunning = false
     private val handler = Handler(Looper.getMainLooper())
-    private var previousImage: Helpers.ImageResponse? = null
-    private var currentImage: Helpers.ImageResponse? = null
-    private var portraitCache: Helpers.ImageResponse? = null
+    private var previousImage: ImmichImageDisplay? = null
+    private var currentImage: ImmichImageDisplay? = null
+    private var portraitCache: ImmichImageDisplay? = null
+
     private val imageRunnable = object : Runnable {
         override fun run() {
             if (isImageTimerRunning) {
-                handler.postDelayed(this, (serverSettings.interval * 1000).toLong())
+                handler.postDelayed(this, (currentSettings.intervalSeconds * 1000).toLong())
                 getNextImage()
             }
         }
     }
-    private val weatherRunnable = object : Runnable {
-        override fun run() {
-            if (isWeatherTimerRunning) {
-                handler.postDelayed(this, 600000)
-                getWeather()
-            }
-        }
-    }
+
     private var isShowingFirst = true
     private var zoomAnimator: ObjectAnimator? = null
-
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onDreamingStarted() {
         super.onDreamingStarted()
-        webViewRetryScope = CoroutineScope(Dispatchers.Main + Job())
         isFullscreen = true
         isInteractive = true
         setContentView(R.layout.screen_saver_view)
-        webView = findViewById(R.id.webView)
-        webView.setBackgroundColor(Color.BLACK)
-        webView.loadUrl("about:blank")
+
+        immichManager = ImmichManager(this)
+        currentSettings = immichManager.getSettings()
+
         imageView1 = findViewById(R.id.imageView1)
         imageView2 = findViewById(R.id.imageView2)
         txtPhotoInfo = findViewById(R.id.txtPhotoInfo)
         txtDateTime = findViewById(R.id.txtDateTime)
 
-        webView.setOnTouchListener { _, _ ->
+        findViewById<View>(R.id.webView)?.visibility = View.GONE
+
+        val rootView = findViewById<View>(android.R.id.content)
+        rootView.setOnTouchListener { _, _ ->
             finish()
             true
         }
@@ -110,8 +84,6 @@ class ScreenSaverService : DreamService() {
 
     override fun onDreamingStopped() {
         super.onDreamingStopped()
-        webViewRetryScope?.cancel()
-        webViewRetryScope = null
         stopImageTimer()
         releaseWakeLock()
         handler.removeCallbacksAndMessages(null)
@@ -138,84 +110,65 @@ class ScreenSaverService : DreamService() {
     }
 
     private fun previousAction() {
-        if (useWebView) {
-            // Simulate a key press
-            webView.requestFocus()
-            val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT)
-            webView.dispatchKeyEvent(event)
-        } else {
-            val safePreviousImage = previousImage
-            if (safePreviousImage != null) {
+        CoroutineScope(Dispatchers.Main).launch {
+            val display = immichManager.getPreviousImage()
+            if (display != null) {
                 stopImageTimer()
-                showImage(safePreviousImage)
+                showImage(display)
                 startImageTimer()
             }
         }
     }
 
     private fun nextAction() {
-        if (useWebView) {
-            // Simulate a key press
-            webView.requestFocus()
-            val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT)
-            webView.dispatchKeyEvent(event)
-        } else {
-            stopImageTimer()
-            getNextImage()
-            startImageTimer()
-        }
+        stopImageTimer()
+        getNextImage()
+        startImageTimer()
     }
 
-    private fun showImage(imageResponse: Helpers.ImageResponse) {
+    private fun showImage(display: ImmichImageDisplay) {
         CoroutineScope(Dispatchers.IO).launch {
-            //get the window size
             val decorView = window.decorView
             val width = decorView.width
             val height = decorView.height
-            val maxSize = maxOf(width, height)
+            val maxSize = maxOf(width, height).coerceAtLeast(1000)
 
-            var randomBitmap = Helpers.decodeBitmapFromBytes(imageResponse.randomImageBase64)
-            val thumbHashBitmap = Helpers.decodeBitmapFromBytes(imageResponse.thumbHashImageBase64)
+            var finalBitmap = display.bitmap
+            val blurredBitmap = display.blurredBackground
             var isMerged = false
 
-            val isPortrait = randomBitmap.height > randomBitmap.width
-            if (isPortrait && serverSettings.layout == "splitview") {
+            val isPortrait = finalBitmap.height > finalBitmap.width
+            if (isPortrait && currentSettings.layout == "splitview") {
                 if (portraitCache != null) {
-                    var decodedPortraitImageBitmap =
-                        Helpers.decodeBitmapFromBytes(portraitCache!!.randomImageBase64)
-                    decodedPortraitImageBitmap =
-                        Helpers.reduceBitmapQuality(decodedPortraitImageBitmap, maxSize)
-                    randomBitmap = Helpers.reduceBitmapQuality(randomBitmap, maxSize)
+                    var firstPortrait = portraitCache!!.bitmap
+                    firstPortrait = Helpers.reduceBitmapQuality(firstPortrait, maxSize)
+                    finalBitmap = Helpers.reduceBitmapQuality(finalBitmap, maxSize)
 
-                    val colorString =
-                        serverSettings.primaryColor?.takeIf { it.isNotBlank() } ?: "#FFFFFF"
-                    val parsedColor = colorString.toColorInt()
+                    val colorString = currentSettings.primaryColor?.takeIf { it.isNotBlank() } ?: "#FFFFFF"
+                    val parsedColor = runCatching { colorString.toColorInt() }.getOrDefault(Color.WHITE)
 
-                    randomBitmap =
-                        Helpers.mergeImages(decodedPortraitImageBitmap, randomBitmap, parsedColor)
+                    finalBitmap = Helpers.mergeImages(firstPortrait, finalBitmap, parsedColor)
                     isMerged = true
-
-                    decodedPortraitImageBitmap.recycle()
                 } else {
-                    portraitCache = imageResponse
+                    portraitCache = display
                     getNextImage()
                     return@launch
                 }
             } else {
-                randomBitmap = Helpers.reduceBitmapQuality(randomBitmap, maxSize * 2)
+                finalBitmap = Helpers.reduceBitmapQuality(finalBitmap, maxSize * 2)
             }
 
             withContext(Dispatchers.Main) {
-                updateUI(randomBitmap, thumbHashBitmap, isMerged, imageResponse)
+                updateUI(finalBitmap, blurredBitmap, isMerged, display)
             }
         }
     }
 
     private fun updateUI(
         finalImage: Bitmap,
-        thumbHashBitmap: Bitmap,
+        blurredBitmap: Bitmap?,
         isMerged: Boolean,
-        imageResponse: Helpers.ImageResponse
+        display: ImmichImageDisplay
     ) {
         val imageViewOld = if (isShowingFirst) imageView1 else imageView2
         val imageViewNew = if (isShowingFirst) imageView2 else imageView1
@@ -227,17 +180,17 @@ class ScreenSaverService : DreamService() {
         imageViewNew.setImageBitmap(finalImage)
         imageViewNew.visibility = View.VISIBLE
 
-        if (blurredBackground) {
-            imageViewNew.background = thumbHashBitmap.toDrawable(resources)
+        if (currentSettings.blurredBackground && blurredBitmap != null) {
+            imageViewNew.background = blurredBitmap.toDrawable(resources)
         } else {
             imageViewNew.background = null
         }
 
         imageViewNew.animate()
             .alpha(1f)
-            .setDuration((serverSettings.transitionDuration * 1000).toLong())
+            .setDuration((currentSettings.transitionDurationSeconds * 1000).toLong())
             .withEndAction {
-                if (serverSettings.imageZoom) {
+                if (currentSettings.imageZoom) {
                     startZoomAnimation(imageViewNew)
                 }
             }
@@ -245,46 +198,37 @@ class ScreenSaverService : DreamService() {
 
         imageViewOld.animate()
             .alpha(0f)
-            .setDuration((serverSettings.transitionDuration * 1000).toLong())
+            .setDuration((currentSettings.transitionDurationSeconds * 1000).toLong())
             .withEndAction {
                 imageViewOld.visibility = View.GONE
             }
             .start()
 
-        // Toggle active ImageView
         isShowingFirst = !isShowingFirst
 
-        if (isMerged) {
-            val mergedPhotoDate =
-                if (portraitCache!!.photoDate.isNotEmpty() || imageResponse.photoDate.isNotEmpty()) {
-                    "${portraitCache!!.photoDate} | ${imageResponse.photoDate}"
-                } else {
-                    ""
-                }
-
-            val mergedImageLocation =
-                if (portraitCache!!.imageLocation.isNotEmpty() || imageResponse.imageLocation.isNotEmpty()) {
-                    "${portraitCache!!.imageLocation} | ${imageResponse.imageLocation}"
-                } else {
-                    ""
-                }
-
-            updatePhotoInfo(mergedPhotoDate, mergedImageLocation)
+        if (isMerged && portraitCache != null) {
+            val mergedDate = listOf(portraitCache!!.photoDate, display.photoDate)
+                .filter { it.isNotEmpty() }
+                .joinToString(" | ")
+            val mergedLoc = listOf(portraitCache!!.imageLocation, display.imageLocation)
+                .filter { it.isNotEmpty() }
+                .joinToString(" | ")
+            updatePhotoInfo(mergedDate, mergedLoc)
             portraitCache = null
         } else {
-            updatePhotoInfo(imageResponse.photoDate, imageResponse.imageLocation)
+            updatePhotoInfo(display.photoDate, display.imageLocation)
         }
 
-        updateDateTimeWeather()
+        updateDateTime()
     }
 
     private fun updatePhotoInfo(photoDate: String, photoLocation: String) {
-        if (serverSettings.showPhotoDate || serverSettings.showImageLocation) {
+        if (currentSettings.showPhotoDate || currentSettings.showImageLocation) {
             val photoInfo = buildString {
-                if (serverSettings.showPhotoDate && photoDate.isNotEmpty()) {
+                if (currentSettings.showPhotoDate && photoDate.isNotEmpty()) {
                     append(photoDate)
                 }
-                if (serverSettings.showImageLocation && photoLocation.isNotEmpty()) {
+                if (currentSettings.showImageLocation && photoLocation.isNotEmpty()) {
                     if (isNotEmpty()) append("\n")
                     append(photoLocation)
                 }
@@ -293,81 +237,52 @@ class ScreenSaverService : DreamService() {
         }
     }
 
-    private fun updateDateTimeWeather() {
-        if (serverSettings.showClock) {
+    private fun updateDateTime() {
+        if (currentSettings.showClock) {
             val currentDateTime = Calendar.getInstance().time
 
             val formattedDate = try {
-                SimpleDateFormat(serverSettings.photoDateFormat, Locale.getDefault()).format(
-                    currentDateTime
-                )
+                SimpleDateFormat(currentSettings.photoDateFormat, Locale.getDefault()).format(currentDateTime)
             } catch (_: Exception) {
                 ""
             }
 
             val formattedTime = try {
-                SimpleDateFormat(serverSettings.clockFormat, Locale.getDefault()).format(
-                    currentDateTime
-                )
+                SimpleDateFormat(currentSettings.clockFormat, Locale.getDefault()).format(currentDateTime)
             } catch (_: Exception) {
                 ""
             }
 
-            val dt = if (showCurrentDate && formattedDate.isNotEmpty()) {
+            val dt = if (currentSettings.showCurrentDate && formattedDate.isNotEmpty()) {
                 "$formattedDate\n$formattedTime"
             } else {
                 formattedTime
             }
 
             txtDateTime.text = SpannableString(dt).apply {
-                val start =
-                    if (showCurrentDate && formattedDate.isNotEmpty()) formattedDate.length + 1 else 0
+                val start = if (currentSettings.showCurrentDate && formattedDate.isNotEmpty()) formattedDate.length + 1 else 0
                 setSpan(RelativeSizeSpan(2f), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-        }
-
-        if (serverSettings.showWeatherDescription) {
-            txtDateTime.append(currentWeather)
         }
     }
 
     private fun getNextImage() {
-        apiService.getImageData().enqueue(object : Callback<Helpers.ImageResponse> {
-            override fun onResponse(
-                call: Call<Helpers.ImageResponse>,
-                response: Response<Helpers.ImageResponse>
-            ) {
-                if (response.isSuccessful) {
-                    val imageResponse = response.body()
-                    if (imageResponse != null) {
-                        previousImage = currentImage
-                        currentImage = imageResponse
-                        showImage(imageResponse)
-                    }
-                } else {
-                    Toast.makeText(
-                        applicationContext,
-                        "Failed to load image (HTTP ${response.code()})",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
+        CoroutineScope(Dispatchers.Main).launch {
+            val display = immichManager.getNextImage()
+            if (display != null) {
+                previousImage = currentImage
+                currentImage = display
+                showImage(display)
+            } else {
+                Log.w("ScreenSaverService", "Failed to fetch image from Immich")
             }
-
-            override fun onFailure(call: Call<Helpers.ImageResponse>, t: Throwable) {
-                t.printStackTrace()
-                Toast.makeText(
-                    applicationContext,
-                    "Failed to load image: ${t.localizedMessage}",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        })
+        }
     }
 
     private fun startImageTimer() {
         if (!isImageTimerRunning) {
             isImageTimerRunning = true
-            handler.postDelayed(imageRunnable, (serverSettings.interval * 1000).toLong())
+            handler.postDelayed(imageRunnable, (currentSettings.intervalSeconds * 1000).toLong())
         }
     }
 
@@ -383,185 +298,30 @@ class ScreenSaverService : DreamService() {
             PropertyValuesHolder.ofFloat("scaleX", 1f, 1.2f),
             PropertyValuesHolder.ofFloat("scaleY", 1f, 1.2f)
         )
-        zoomAnimator?.duration = (serverSettings.interval * 1000).toLong()
+        zoomAnimator?.duration = (currentSettings.intervalSeconds * 1000).toLong()
         zoomAnimator?.start()
     }
 
-    private fun getWeather() {
-        apiService.getWeather().enqueue(object : Callback<Helpers.Weather> {
-            override fun onResponse(
-                call: Call<Helpers.Weather>,
-                response: Response<Helpers.Weather>
-            ) {
-                if (response.isSuccessful) {
-                    val weatherResponse = response.body()
-                    if (weatherResponse != null) {
-                        currentWeather =
-                            "\n ${weatherResponse.location}, ${weatherResponse.temperatureUnit} \n ${weatherResponse.description}"
-                    }
-                }
-            }
-
-            override fun onFailure(call: Call<Helpers.Weather>, t: Throwable) {
-                Log.e("Weather", "Failed to fetch weather: ${t.message}")
-            }
-        })
-    }
-
-    private fun getServerSettings(
-        onSuccess: (Helpers.ServerSettings) -> Unit,
-        onFailure: (Throwable) -> Unit,
-        maxRetries: Int = 18,
-        retryDelayMillis: Long = 5000
-    ) {
-        var retryCount = 0
-
-        fun attemptFetch() {
-            apiService.getServerSettings().enqueue(object : Callback<Helpers.ServerSettings> {
-                override fun onResponse(
-                    call: Call<Helpers.ServerSettings>,
-                    response: Response<Helpers.ServerSettings>
-                ) {
-                    if (response.isSuccessful) {
-                        val serverSettingsResponse = response.body()
-                        if (serverSettingsResponse != null) {
-                            onSuccess(serverSettingsResponse)
-                        } else {
-                            handleFailure(Exception("Empty response body"))
-                        }
-                    } else {
-                        handleFailure(Exception("HTTP ${response.code()}: ${response.message()}"))
-                    }
-                }
-
-                override fun onFailure(call: Call<Helpers.ServerSettings>, t: Throwable) {
-                    handleFailure(t)
-                }
-
-                private fun handleFailure(t: Throwable) {
-                    if (retryCount < maxRetries) {
-                        retryCount++
-                        Toast.makeText(
-                            this@ScreenSaverService,
-                            "Retrying to fetch server settings... Attempt $retryCount of $maxRetries",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            attemptFetch()
-                        }, retryDelayMillis)
-                    } else {
-                        onFailure(t)
-                    }
-                }
-            })
-        }
-
-        attemptFetch()
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
     private fun loadSettings() {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(applicationContext)
-        blurredBackground = prefs.getBoolean("blurredBackground", true)
-        showCurrentDate = prefs.getBoolean("showCurrentDate", true)
-        var savedUrl = prefs.getString("webview_url", "") ?: ""
-        useWebView = prefs.getBoolean("useWebView", true)
-        val authSecret = prefs.getString("authSecret", "") ?: ""
+        currentSettings = immichManager.getSettings()
 
-        webView.visibility = if (useWebView) View.VISIBLE else View.GONE
-        imageView1.visibility = if (useWebView) View.GONE else View.VISIBLE
-        imageView2.visibility = if (useWebView) View.GONE else View.VISIBLE
-        txtPhotoInfo.visibility = View.GONE //enabled in onSettingsLoaded based on server settings
-        txtDateTime.visibility = View.GONE //enabled in onSettingsLoaded based on server settings
+        imageView1.visibility = View.VISIBLE
+        imageView2.visibility = View.VISIBLE
 
-        if (useWebView) {
-            savedUrl = if (authSecret.isNotEmpty()) {
-                savedUrl.toUri()
-                    .buildUpon()
-                    .appendQueryParameter("authsecret", authSecret)
-                    .build()
-                    .toString()
-            } else {
-                savedUrl
-            }
-            handler.removeCallbacks(imageRunnable)
-            handler.removeCallbacks(weatherRunnable)
-            webView.webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(
-                    view: WebView?,
-                    request: WebResourceRequest?
-                ): Boolean {
-                    val url = request?.url
-                    if (url != null) {
-                        // Open the URL in the default browser
-                        val intent = Intent(Intent.ACTION_VIEW, url)
-                        startActivity(intent)
-                        return true
-                    }
-                    return false
-                }
-
-                override fun onReceivedError(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?
-                ) {
-                    super.onReceivedError(view, request, error)
-
-                    if (request?.isForMainFrame == true && error != null) {
-                        view?.loadUrl("file:///android_asset/error_page.html")
-
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            val errorCode = error.errorCode
-                            val errorDescription = error.description.toString().replace("'", "\\'")
-                            view?.evaluateJavascript("showError('$errorCode', '$errorDescription')", null)
-                        }, 500)
-                    }
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        webView.loadUrl(savedUrl)
-                    }, 5000)
-                }
-            }
-            webView.settings.javaScriptEnabled = true
-            webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-            webView.settings.domStorageEnabled = true
-            loadWebViewWithRetry(savedUrl)
-        } else {
-            retrofit = Helpers.createRetrofit(savedUrl, authSecret)
-            apiService = retrofit!!.create(Helpers.ApiService::class.java)
-            getServerSettings(
-                onSuccess = { settings ->
-                    serverSettings = settings
-                    onSettingsLoaded()
-                },
-                onFailure = { error ->
-                    Toast.makeText(
-                        this,
-                        "Failed to load server settings: ${error.localizedMessage}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            )
-        }
-    }
-
-    private fun onSettingsLoaded() {
-        if (serverSettings.imageFill){
+        if (currentSettings.imageFill) {
             imageView1.scaleType = ImageView.ScaleType.CENTER_CROP
             imageView2.scaleType = ImageView.ScaleType.CENTER_CROP
-        }
-        else{
+        } else {
             imageView1.scaleType = ImageView.ScaleType.FIT_CENTER
             imageView2.scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        if (serverSettings.showPhotoDate || serverSettings.showImageLocation) {
+
+        if (currentSettings.showPhotoDate || currentSettings.showImageLocation) {
             txtPhotoInfo.visibility = View.VISIBLE
-            txtPhotoInfo.textSize =
-                Helpers.cssFontSizeToSp(serverSettings.baseFontSize, this)
-            if (serverSettings.primaryColor != null) {
+            txtPhotoInfo.textSize = Helpers.cssFontSizeToSp(currentSettings.baseFontSize, this)
+            if (currentSettings.primaryColor != null) {
                 txtPhotoInfo.setTextColor(
-                    runCatching { serverSettings.primaryColor!!.toColorInt() }
-                        .getOrDefault(Color.WHITE)
+                    runCatching { currentSettings.primaryColor!!.toColorInt() }.getOrDefault(Color.WHITE)
                 )
             } else {
                 txtPhotoInfo.setTextColor(Color.WHITE)
@@ -569,13 +329,13 @@ class ScreenSaverService : DreamService() {
         } else {
             txtPhotoInfo.visibility = View.GONE
         }
-        if (serverSettings.showClock) {
+
+        if (currentSettings.showClock) {
             txtDateTime.visibility = View.VISIBLE
-            txtDateTime.textSize = Helpers.cssFontSizeToSp(serverSettings.baseFontSize, this)
-            if (serverSettings.primaryColor != null) {
+            txtDateTime.textSize = Helpers.cssFontSizeToSp(currentSettings.baseFontSize, this)
+            if (currentSettings.primaryColor != null) {
                 txtDateTime.setTextColor(
-                    runCatching { serverSettings.primaryColor!!.toColorInt() }
-                        .getOrDefault(Color.WHITE)
+                    runCatching { currentSettings.primaryColor!!.toColorInt() }.getOrDefault(Color.WHITE)
                 )
             } else {
                 txtDateTime.setTextColor(Color.WHITE)
@@ -586,20 +346,6 @@ class ScreenSaverService : DreamService() {
 
         getNextImage()
         startImageTimer()
-
-        if (serverSettings.showWeatherDescription) {
-            getWeather()
-            if (!isWeatherTimerRunning) {
-                isWeatherTimerRunning = true
-                handler.postDelayed(object : Runnable {
-                    override fun run() {
-                        getWeather()
-                        handler.postDelayed(this, 600000)
-                    }
-                }, (300000))
-            }
-
-        }
     }
 
     private fun acquireWakeLock() {
@@ -619,38 +365,5 @@ class ScreenSaverService : DreamService() {
             }
         }
         wakeLock = null
-    }
-
-    private fun loadWebViewWithRetry(
-        url: String,
-        attempt: Int = 1,
-        maxAttempts: Int = 36
-    ) {
-        webViewRetryScope?.launch {
-            val reachable = withContext(Dispatchers.IO) {
-                Helpers.isServerReachable(url)
-            }
-
-            if (reachable) {
-                webView.loadUrl(url)
-            } else if (attempt <= maxAttempts) {
-                Toast.makeText(
-                    this@ScreenSaverService,
-                    "Connecting to server... Attempt $attempt of $maxAttempts",
-                    Toast.LENGTH_SHORT
-                ).show()
-
-                delay(5_000)
-                loadWebViewWithRetry(url, attempt + 1, maxAttempts)
-            } else {
-                Toast.makeText(
-                    this@ScreenSaverService,
-                    "Could not connect to server after $maxAttempts attempts",
-                    Toast.LENGTH_LONG
-                ).show()
-
-                webView.loadUrl(url)
-            }
-        }
     }
 }

@@ -21,53 +21,67 @@ import java.text.DateFormatSymbols
 import java.util.Locale
 
 class SettingsFragment : PreferenceFragmentCompat() {
+    private lateinit var immichManager: ImmichManager
+
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.settings_view, rootKey)
-        val chkUseWebView = findPreference<SwitchPreferenceCompat>("useWebView")
-        val chkBlurredBackground = findPreference<SwitchPreferenceCompat>("blurredBackground")
-        val chkShowCurrentDate = findPreference<SwitchPreferenceCompat>("showCurrentDate")
+        immichManager = ImmichManager(requireContext())
+
         val chkActiveTimes = findPreference<SwitchPreferenceCompat>("activeTimes")
         val editActiveSchedule = findPreference<Preference>("active_schedule_edit")
         val adminActiveSchedule = findPreference<Preference>("active_schedule_admin")
 
-
-        //obfuscate the authSecret
-        val authPref = findPreference<EditTextPreference>("authSecret")
-        authPref?.setOnBindEditTextListener { editText ->
+        // Obfuscate API key in settings
+        val apiKeyPref = findPreference<EditTextPreference>("immich_api_key")
+        apiKeyPref?.setOnBindEditTextListener { editText ->
             editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
 
-        // Update visibility based on switches
-        val useWebView = chkUseWebView?.isChecked ?: false
-        chkBlurredBackground?.isVisible = !useWebView
-        chkShowCurrentDate?.isVisible = !useWebView
+        // Test connection button
+        val btnTest = findPreference<Preference>("test_connection")
+        btnTest?.setOnPreferenceClickListener {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+            val url = prefs.getString("immich_server_url", "")?.trim() ?: ""
+            val key = prefs.getString("immich_api_key", "")?.trim() ?: ""
+
+            if (url.isBlank()) {
+                Toast.makeText(requireContext(), "Please enter an Immich Server URL first.", Toast.LENGTH_SHORT).show()
+                return@setOnPreferenceClickListener true
+            }
+
+            Toast.makeText(requireContext(), "Testing connection to Immich...", Toast.LENGTH_SHORT).show()
+            immichManager.testConnection(url, key) { success, message ->
+                activity?.runOnUiThread {
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(if (success) "Connection Succeeded" else "Connection Failed")
+                        .setMessage(message)
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+            true
+        }
+
         val activeTimes = chkActiveTimes?.isChecked ?: false
         editActiveSchedule?.isVisible = activeTimes
         adminActiveSchedule?.isVisible = activeTimes
         updateAdminSummary(adminActiveSchedule)
         updateScheduleSummary(editActiveSchedule)
 
-        // React to changes
-        chkUseWebView?.setOnPreferenceChangeListener { _, newValue ->
-            val value = newValue as Boolean
-            chkBlurredBackground?.isVisible = !value
-            chkShowCurrentDate?.isVisible = !value
-            //add android settings button
-            true
-        }
         chkActiveTimes?.setOnPreferenceChangeListener { _, newValue ->
             val value = newValue as Boolean
             editActiveSchedule?.isVisible = value
             adminActiveSchedule?.isVisible = value
             true
         }
+
         editActiveSchedule?.setOnPreferenceClickListener {
             startActivity(Intent(requireContext(), ActiveScheduleActivity::class.java))
             true
         }
+
         adminActiveSchedule?.setOnPreferenceClickListener {
-            val dpm = requireContext()
-                .getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val dpm = requireContext().getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val component = FrameDeviceAdminReceiver.componentName(requireContext())
             if (dpm.isAdminActive(component)) {
                 MaterialAlertDialogBuilder(requireContext())
@@ -75,7 +89,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     .setMessage("ImmichFrame can already turn the screen off. Disable this permission?")
                     .setPositiveButton("Disable") { _, _ ->
                         dpm.removeActiveAdmin(component)
-                        // removeActiveAdmin applies asynchronously; refresh once it takes effect.
                         Handler(Looper.getMainLooper()).postDelayed({
                             updateAdminSummary(adminActiveSchedule)
                         }, 500)
@@ -94,6 +107,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
             true
         }
+
         val chkSettingsLock = findPreference<SwitchPreferenceCompat>("settingsLock")
         chkSettingsLock?.setOnPreferenceChangeListener { _, newValue ->
             val enabling = newValue as Boolean
@@ -104,9 +118,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
                         "This will disable access to the settings screen, the only way back is via RPC commands (or uninstall/reinstall).\n" +
                                 "Are you absolutely sure?"
                     )
-                    .setPositiveButton("Yes", null) // Proceed
+                    .setPositiveButton("Yes", null)
                     .setNegativeButton("No") { dialog, _ ->
-                        chkSettingsLock.isChecked = false // revert
+                        chkSettingsLock.isChecked = false
                         dialog.dismiss()
                     }
                     .show()
@@ -114,14 +128,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-
         val btnClose = findPreference<Preference>("closeSettings")
         btnClose?.setOnPreferenceClickListener {
-            val url = PreferenceManager.getDefaultSharedPreferences(requireContext())
-                .getString("webview_url", "")?.trim()
-            val urlPattern = Regex("^https?://.+")
-            return@setOnPreferenceClickListener if (url.isNullOrEmpty() || !url.matches(urlPattern)) {
-                Toast.makeText(requireContext(), "Please enter a valid server URL.", Toast.LENGTH_LONG).show()
+            val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+            val url = prefs.getString("immich_server_url", "")
+                ?.takeIf { it.isNotBlank() }
+                ?: prefs.getString("webview_url", "") ?: ""
+
+            if (url.isBlank()) {
+                Toast.makeText(requireContext(), "Please enter an Immich Server URL.", Toast.LENGTH_LONG).show()
                 false
             } else {
                 activity?.setResult(Activity.RESULT_OK)
@@ -134,11 +149,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
         btnAndroidSettings?.setOnPreferenceClickListener {
             val context = requireContext()
 
-            // Only show Toast + auto-return on Android 9 and below
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 Toast.makeText(context, "Returning to app in 2 minutes…", Toast.LENGTH_LONG).show()
-
-                // Schedule return after 2 minutes
                 Handler(Looper.getMainLooper()).postDelayed({
                     val returnIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                     returnIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -146,10 +158,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 }, 2 * 60 * 1000)
             }
 
-            // Launch Android settings
             val intent = Intent(Settings.ACTION_SETTINGS)
             startActivity(intent)
-
             true
         }
     }
@@ -177,9 +187,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    // Collapse a set of Calendar weekday constants into a compact label, e.g. "Mon–Fri, Sun".
     private fun summarizeDays(days: Set<Int>): String {
-        val order = intArrayOf(2, 3, 4, 5, 6, 7, 1) // Mon..Sun
+        val order = intArrayOf(2, 3, 4, 5, 6, 7, 1)
         val indices = order.indices.filter { days.contains(order[it]) }
         if (indices.isEmpty()) return ""
         val names = DateFormatSymbols(Locale.getDefault()).shortWeekdays
@@ -201,8 +210,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun updateAdminSummary(preference: Preference?) {
         val pref = preference ?: return
-        val dpm = requireContext()
-            .getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val dpm = requireContext().getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val enabled = dpm.isAdminActive(FrameDeviceAdminReceiver.componentName(requireContext()))
         pref.summary = if (enabled) {
             "Enabled — the frame can turn off the screen and sleep the device. Tap to disable."

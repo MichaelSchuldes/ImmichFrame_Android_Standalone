@@ -1,40 +1,134 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <PreferenceCategory android:title="Connection Settings">
+    <PreferenceCategory android:title="Immich Connection">
         <EditTextPreference
-            android:defaultValue=""
-            android:inputType="textUri"
-            android:key="webview_url"
-            android:title="ImmichFrame Server URL" />
+            android:key="immich_server_url"
+            android:title="Immich Server URL"
+            android:dialogTitle="Immich Server URL"
+            android:summary="e.g. http://192.168.1.100:2283"
+            android:inputType="textUri" />
         <EditTextPreference
+            android:key="immich_api_key"
+            android:title="Immich API Key"
+            android:dialogTitle="Immich API Key"
+            android:summary="API key generated in Immich account settings" />
+        <Preference
+            android:key="test_connection"
+            android:layout="@layout/pref_test_button" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Content &amp; Filters">
+        <SwitchPreferenceCompat
+            android:key="filter_favorites_only"
+            android:defaultValue="false"
+            android:title="Favorites Only"
+            android:summary="Only display assets marked as favorite" />
+        <SwitchPreferenceCompat
+            android:key="filter_include_memories"
+            android:defaultValue="false"
+            android:title="Include Memories"
+            android:summary="Include 'On this day' memories" />
+        <EditTextPreference
+            android:key="filter_album_ids"
             android:defaultValue=""
-            android:key="authSecret"
-            android:title="Authorization Secret" />
+            android:title="Album IDs"
+            android:dialogTitle="Album IDs"
+            android:summary="Optional comma-separated Album UUIDs" />
+        <EditTextPreference
+            android:key="filter_person_ids"
+            android:defaultValue=""
+            android:title="Person IDs"
+            android:dialogTitle="Person IDs"
+            android:summary="Optional comma-separated Person UUIDs" />
+        <EditTextPreference
+            android:key="filter_tag_ids"
+            android:defaultValue=""
+            android:title="Tag IDs"
+            android:dialogTitle="Tag IDs"
+            android:summary="Optional comma-separated Tag UUIDs" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Display Options">
+        <EditTextPreference
+            android:key="slideshow_interval"
+            android:defaultValue="20"
+            android:title="Interval (seconds)"
+            android:dialogTitle="Interval in seconds"
+            android:inputType="number" />
+        <EditTextPreference
+            android:key="transition_duration"
+            android:defaultValue="1.0"
+            android:title="Transition Duration (seconds)"
+            android:dialogTitle="Transition Duration in seconds"
+            android:inputType="numberDecimal" />
         <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="useWebView"
-            android:title="Use WebView?" />
-        <SwitchPreferenceCompat
+            android:key="splitView"
             android:defaultValue="false"
+            android:title="SplitView for Portraits"
+            android:summary="Display two portrait photos side-by-side" />
+        <SwitchPreferenceCompat
+            android:key="imageFill"
+            android:defaultValue="false"
+            android:title="Fill Screen (Crop)" />
+        <SwitchPreferenceCompat
+            android:key="imageZoom"
+            android:defaultValue="false"
+            android:title="Slow Zoom Effect" />
+        <SwitchPreferenceCompat
             android:key="blurredBackground"
-            android:title="Blurred Background?" />
+            android:defaultValue="true"
+            android:title="Blurred Letterbox Background" />
         <SwitchPreferenceCompat
-            android:defaultValue="false"
+            android:key="showPhotoDate"
+            android:defaultValue="true"
+            android:title="Show Photo Date" />
+        <EditTextPreference
+            android:key="photoDateFormat"
+            android:defaultValue="EEE, MMM d, yyyy"
+            android:title="Photo Date Format"
+            android:dialogTitle="Photo Date Format" />
+        <SwitchPreferenceCompat
+            android:key="showImageLocation"
+            android:defaultValue="true"
+            android:title="Show Photo Location" />
+        <EditTextPreference
+            android:key="imageLocationFormat"
+            android:defaultValue="City, Country"
+            android:title="Photo Location Format"
+            android:dialogTitle="Location Format (e.g. City, Country)" />
+        <SwitchPreferenceCompat
+            android:key="showClock"
+            android:defaultValue="true"
+            android:title="Show Clock" />
+        <SwitchPreferenceCompat
             android:key="showCurrentDate"
-            android:title="Show Current Date?" />
+            android:defaultValue="true"
+            android:title="Show Current Date" />
+        <EditTextPreference
+            android:key="clockFormat"
+            android:defaultValue="h:mm a"
+            android:title="Clock Time Format"
+            android:dialogTitle="Clock Time Format" />
+        <EditTextPreference
+            android:key="primaryColor"
+            android:defaultValue="#FFFFFF"
+            android:title="Text Color (Hex)"
+            android:dialogTitle="Text Color (e.g. #FFFFFF)" />
+        <EditTextPreference
+            android:key="baseFontSize"
+            android:defaultValue="24px"
+            android:title="Base Font Size"
+            android:dialogTitle="Base Font Size (e.g. 24px)" />
         <SwitchPreferenceCompat
-            android:defaultValue="false"
             android:key="settingsLock"
-            android:title="Lock access to these settings?" />
+            android:defaultValue="false"
+            android:title="Lock Settings Access" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Active Times">
         <SwitchPreferenceCompat
-            android:defaultValue="false"
             android:key="activeTimes"
+            android:defaultValue="false"
             android:title="Set Active Hours?" />
         <Preference
             android:dependency="activeTimes"
@@ -50,7 +144,6 @@
 
     <PreferenceCategory android:title="Android Settings">
         <Preference
-            android:defaultValue=""
             android:key="androidSettings"
             android:title="Launch Android Settings" />
     </PreferenceCategory>

@@ -11,9 +11,6 @@ import androidx.preference.PreferenceManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 import kotlinx.coroutines.withContext
 
 class WidgetProvider : AppWidgetProvider() {
@@ -48,12 +45,6 @@ class WidgetProvider : AppWidgetProvider() {
             }
             views.setInt(R.id.widget_frame, "setBackgroundResource", backgroundRes)
 
-            /*//get the current size of the widget, set maxSize to twice that
-            val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
-            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
-            val maxSize = maxOf(width, height) * 2*/
-
             val intent = Intent(context, WidgetProvider::class.java).apply {
                 action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, intArrayOf(appWidgetId))
@@ -74,31 +65,20 @@ class WidgetProvider : AppWidgetProvider() {
             appWidgetManager.updateAppWidget(appWidgetId, views)
 
             try {
-                val savedUrl = prefs.getString("webview_url", "") ?: ""
-                val authSecret = prefs.getString("authSecret", "") ?: ""
+                val manager = ImmichManager(context)
+                val settings = manager.getSettings()
 
-                if (savedUrl.isNotEmpty()) {
-                    val retrofit = Helpers.createRetrofit(savedUrl, authSecret)
-                    val apiService = retrofit.create(Helpers.ApiService::class.java)
-
+                if (settings.serverUrl.isNotBlank()) {
                     CoroutineScope(Dispatchers.IO).launch {
-                        getNextImage(apiService) { imageResponse ->
-                            imageResponse?.let {
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    var randomBitmap =
-                                        Helpers.decodeBitmapFromBytes(it.randomImageBase64)
-
-                                    //randomBitmap = Helpers.reduceBitmapQuality(randomBitmap, maxSize)
-                                    randomBitmap = Helpers.reduceBitmapQuality(randomBitmap, 1000)
-
-                                    withContext(Dispatchers.Main) {
-                                        views.setImageViewBitmap(
-                                            R.id.widgetImageView,
-                                            randomBitmap
-                                        )
-                                        appWidgetManager.updateAppWidget(appWidgetId, views)
-                                    }
-                                }
+                        val display = manager.getNextImage()
+                        if (display != null) {
+                            val reduced = Helpers.reduceBitmapQuality(display.bitmap, 1000)
+                            withContext(Dispatchers.Main) {
+                                views.setImageViewBitmap(
+                                    R.id.widgetImageView,
+                                    reduced
+                                )
+                                appWidgetManager.updateAppWidget(appWidgetId, views)
                             }
                         }
                     }
@@ -106,28 +86,6 @@ class WidgetProvider : AppWidgetProvider() {
             } catch (e: Exception) {
                 Log.e("WidgetDebug", "Error updating widget: ${e.message}")
             }
-        }
-
-        private fun getNextImage(
-            apiService: Helpers.ApiService,
-            callback: (Helpers.ImageResponse?) -> Unit
-        ) {
-            apiService.getImageData().enqueue(object : Callback<Helpers.ImageResponse> {
-                override fun onResponse(
-                    call: Call<Helpers.ImageResponse>,
-                    response: Response<Helpers.ImageResponse>
-                ) {
-                    if (response.isSuccessful) {
-                        callback(response.body())
-                    } else {
-                        callback(null)
-                    }
-                }
-
-                override fun onFailure(call: Call<Helpers.ImageResponse>, t: Throwable) {
-                    callback(null)
-                }
-            })
         }
     }
 }
