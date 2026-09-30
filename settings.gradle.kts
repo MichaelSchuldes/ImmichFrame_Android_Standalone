@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ImmichFrame"
+rootProject.name = "immichframe-standalone"
 include(":app")

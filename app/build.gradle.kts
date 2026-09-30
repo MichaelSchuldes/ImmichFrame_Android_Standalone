@@ -27,6 +27,10 @@ android {
     namespace = "com.immichframe.immichframe"
     compileSdk = 36
 
+    base {
+        archivesName.set("immichframe-standalone")
+    }
+
     defaultConfig {
         applicationId = "com.immichframe.immichframe"
         minSdk = 23
