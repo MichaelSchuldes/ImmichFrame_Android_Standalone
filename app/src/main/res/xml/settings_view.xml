@@ -150,6 +150,10 @@
 
     <PreferenceCategory android:title="Android Settings">
         <Preference
+            android:key="defaultLauncher"
+            android:title="Set as Default Launcher"
+            android:summary="Choose ImmichFrame as your default Home screen" />
+        <Preference
             android:key="androidSettings"
             android:title="Launch Android Settings" />
     </PreferenceCategory>

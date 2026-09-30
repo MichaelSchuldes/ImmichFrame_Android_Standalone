@@ -145,6 +145,28 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
+        val btnDefaultLauncher = findPreference<Preference>("defaultLauncher")
+        btnDefaultLauncher?.setOnPreferenceClickListener {
+            val context = requireContext()
+            try {
+                // Open Android's Home / Default Apps settings screen (available in Android 6.0+)
+                val intent = Intent(Settings.ACTION_HOME_SETTINGS)
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    // Fallback to presenting the launcher chooser directly
+                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(Intent.createChooser(homeIntent, "Select Home / Launcher App"))
+                } catch (e2: Exception) {
+                    Toast.makeText(context, "Please set ImmichFrame as default in Android Settings -> Apps -> Default Apps -> Home app.", Toast.LENGTH_LONG).show()
+                }
+            }
+            true
+        }
+
         val btnAndroidSettings = findPreference<Preference>("androidSettings")
         btnAndroidSettings?.setOnPreferenceClickListener {
             val context = requireContext()
