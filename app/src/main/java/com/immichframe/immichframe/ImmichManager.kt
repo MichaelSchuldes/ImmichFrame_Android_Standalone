@@ -33,6 +33,7 @@ class ImmichManager(private val context: Context) {
         val includeMemories: Boolean,
         val albumIds: List<String>,
         val personIds: List<String>,
+        val excludedPeople: List<String> = emptyList(),
         val tagIds: List<String>,
         val layout: String,
         val imageFill: Boolean,
@@ -89,6 +90,11 @@ class ImmichManager(private val context: Context) {
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
+        val excludedRaw = prefs.getString("filter_excluded_person_ids", "") ?: ""
+        val excludedPeople = excludedRaw.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
         val tagsRaw = prefs.getString("filter_tag_ids", "") ?: ""
         val tagIds = tagsRaw.split(",")
             .map { it.trim() }
@@ -128,6 +134,7 @@ class ImmichManager(private val context: Context) {
             includeMemories = includeMemories,
             albumIds = albumIds,
             personIds = personIds,
+            excludedPeople = excludedPeople,
             tagIds = tagIds,
             layout = layout,
             imageFill = imageFill,
@@ -340,9 +347,13 @@ class ImmichManager(private val context: Context) {
                                     val updatedAsset = asset.copy(
                                         exifInfo = currentExif.copy(description = desc)
                                     )
-                                    assetQueue.add(updatedAsset)
+                                    if (!containsExcludedPerson(updatedAsset, settings.excludedPeople)) {
+                                        assetQueue.add(updatedAsset)
+                                    }
                                 } else {
-                                    assetQueue.add(asset)
+                                    if (!containsExcludedPerson(asset, settings.excludedPeople)) {
+                                        assetQueue.add(asset)
+                                    }
                                 }
                             }
                         }
@@ -375,7 +386,8 @@ class ImmichManager(private val context: Context) {
                 if (response.isSuccessful && response.body() != null) {
                     val items = response.body()!!.assets.items.toMutableList()
                     items.shuffle()
-                    assetQueue.addAll(items)
+                    val filtered = items.filterNot { containsExcludedPerson(it, settings.excludedPeople) }
+                    assetQueue.addAll(filtered)
                 }
             } else {
                 // 3. Random Search (Timeline)
@@ -389,7 +401,8 @@ class ImmichManager(private val context: Context) {
 
                 val response = apiService.getRandomAssets(randomDto).execute()
                 if (response.isSuccessful && response.body() != null) {
-                    assetQueue.addAll(response.body()!!)
+                    val filtered = response.body()!!.filterNot { containsExcludedPerson(it, settings.excludedPeople) }
+                    assetQueue.addAll(filtered)
                 }
             }
         } catch (e: Exception) {
@@ -399,7 +412,31 @@ class ImmichManager(private val context: Context) {
         }
     }
 
+    private fun containsExcludedPerson(asset: ImmichAsset, excludedList: List<String>): Boolean {
+        if (excludedList.isEmpty()) return false
+        val people = asset.people ?: return false
+        for (person in people) {
+            val personId = person.id.trim()
+            val personName = person.name?.trim() ?: ""
+            for (target in excludedList) {
+                val t = target.trim()
+                if (t.isNotEmpty()) {
+                    if (personId.equals(t, ignoreCase = true) ||
+                        personName.equals(t, ignoreCase = true) ||
+                        (personName.isNotEmpty() && personName.contains(t, ignoreCase = true))) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     private fun downloadAndBuildDisplay(asset: ImmichAsset, settings: FrameSettings): ImmichImageDisplay? {
+        if (containsExcludedPerson(asset, settings.excludedPeople)) {
+            return null
+        }
+
         // Try preview first (1080p/1440p), fallback to original
         var bitmap = fetchBitmap(asset.id, "preview", settings)
         if (bitmap == null) {

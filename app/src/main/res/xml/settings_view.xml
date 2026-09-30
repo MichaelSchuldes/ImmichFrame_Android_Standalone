@@ -37,9 +37,15 @@
         <EditTextPreference
             android:key="filter_person_ids"
             android:defaultValue=""
-            android:title="Person IDs"
-            android:dialogTitle="Person IDs"
-            android:summary="Optional comma-separated Person UUIDs" />
+            android:title="Include Person IDs"
+            android:dialogTitle="Include Person IDs"
+            android:summary="Optional comma-separated Person UUIDs to include" />
+        <EditTextPreference
+            android:key="filter_excluded_person_ids"
+            android:defaultValue=""
+            android:title="Exclude People"
+            android:dialogTitle="Exclude People"
+            android:summary="Comma-separated names or UUIDs of people to exclude" />
         <EditTextPreference
             android:key="filter_tag_ids"
             android:defaultValue=""
