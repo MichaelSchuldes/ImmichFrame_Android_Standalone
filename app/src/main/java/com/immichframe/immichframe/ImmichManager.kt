@@ -56,6 +56,11 @@ class ImmichManager(private val context: Context) {
     private var historyIndex = -1
     private var isFetchingAssets = false
 
+    @Volatile
+    private var albumCache: Map<String, String>? = null
+    @Volatile
+    private var albumCacheTime = 0L
+
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
@@ -370,12 +375,14 @@ class ImmichManager(private val context: Context) {
                     settings.tagIds.isNotEmpty()
 
             if (hasCustomFilters) {
+                val resolvedAlbumIds = resolveAlbumIds(apiService, settings.albumIds)
+
                 val metadataDto = MetadataSearchDto(
                     page = 1,
                     size = 100,
                     type = "IMAGE",
                     isFavorite = if (settings.favoritesOnly) true else null,
-                    albumIds = settings.albumIds.takeIf { it.isNotEmpty() },
+                    albumIds = resolvedAlbumIds.takeIf { it.isNotEmpty() },
                     personIds = settings.personIds.takeIf { it.isNotEmpty() },
                     tagIds = settings.tagIds.takeIf { it.isNotEmpty() },
                     withExif = true,
@@ -430,6 +437,60 @@ class ImmichManager(private val context: Context) {
             }
         }
         return false
+    }
+
+    private fun resolveAlbumIds(apiService: ImmichApiService, inputs: List<String>): List<String> {
+        if (inputs.isEmpty()) return emptyList()
+
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        val needsResolution = inputs.any { !uuidRegex.matches(it.trim()) }
+        if (!needsResolution) {
+            return inputs
+        }
+
+        val now = System.currentTimeMillis()
+        if (albumCache == null || now - albumCacheTime > 10 * 60 * 1000L) {
+            try {
+                val response = apiService.getAlbums().execute()
+                if (response.isSuccessful && response.body() != null) {
+                    val map = mutableMapOf<String, String>()
+                    for (album in response.body()!!) {
+                        val name = album.albumName?.trim()?.lowercase()
+                        if (!name.isNullOrEmpty()) {
+                            map[name] = album.id
+                        }
+                        map[album.id.lowercase()] = album.id
+                    }
+                    albumCache = map
+                    albumCacheTime = now
+                }
+            } catch (e: Exception) {
+                Log.w("ImmichManager", "Failed to fetch albums for name resolution: ${e.message}")
+            }
+        }
+
+        val cache = albumCache ?: emptyMap()
+        val resolved = mutableListOf<String>()
+
+        for (item in inputs) {
+            val trimmed = item.trim()
+            val lower = trimmed.lowercase()
+            val mappedId = cache[lower]
+            if (mappedId != null) {
+                resolved.add(mappedId)
+            } else if (uuidRegex.matches(trimmed)) {
+                resolved.add(trimmed)
+            } else {
+                val partialMatch = cache.entries.firstOrNull { it.key.contains(lower) || lower.contains(it.key) }
+                if (partialMatch != null) {
+                    resolved.add(partialMatch.value)
+                } else {
+                    Log.w("ImmichManager", "Could not resolve album name '$trimmed' to an ID")
+                }
+            }
+        }
+
+        return resolved.distinct()
     }
 
     private fun downloadAndBuildDisplay(asset: ImmichAsset, settings: FrameSettings): ImmichImageDisplay? {

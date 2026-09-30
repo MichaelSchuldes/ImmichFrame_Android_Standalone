@@ -21,4 +21,7 @@ interface ImmichApiService {
 
     @GET("api/memories")
     fun getMemories(@Query("timestamp") timestamp: String? = null): Call<List<MemoryResponseDto>>
+
+    @GET("api/albums")
+    fun getAlbums(): Call<List<ImmichAlbumDto>>
 }

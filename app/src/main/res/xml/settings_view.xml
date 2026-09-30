@@ -31,9 +31,9 @@
         <EditTextPreference
             android:key="filter_album_ids"
             android:defaultValue=""
-            android:title="Album IDs"
-            android:dialogTitle="Album IDs"
-            android:summary="Optional comma-separated Album UUIDs" />
+            android:title="Albums"
+            android:dialogTitle="Filter by Albums"
+            android:summary="Comma-separated album names or UUIDs" />
         <EditTextPreference
             android:key="filter_person_ids"
             android:defaultValue=""

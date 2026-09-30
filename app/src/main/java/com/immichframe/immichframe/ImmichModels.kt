@@ -88,6 +88,13 @@ data class ServerVersionDto(
     @SerializedName("patch") val patch: Int? = null
 )
 
+data class ImmichAlbumDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("albumName") val albumName: String? = null,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("assetCount") val assetCount: Int? = 0
+)
+
 /**
  * Display container for image and formatted metadata.
  */
