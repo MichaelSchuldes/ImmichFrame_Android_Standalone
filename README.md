@@ -116,6 +116,54 @@ adb shell am start -n com.immichframe.immichframe/.SettingsActivity
 
 ---
 
+## 🔒 Let's Encrypt & HTTPS Certificates (Android 6.0)
+
+### Out-of-the-Box Support
+Older Android versions (Android 6.0 and earlier) lack the modern **ISRG Root X1** CA certificate used by Let's Encrypt (due to the expiration of the legacy *DST Root CA X3* in September 2021). 
+
+**You do NOT need to modify system certificates for ImmichFrame.**
+`immichframe-standalone` comes with the **ISRG Root X1** certificate directly bundled into its internal OkHttp/Retrofit SSL engine. Connecting to `https://immich.yourdomain.com` with a standard Let's Encrypt certificate works immediately out-of-the-box.
+
+---
+
+### (Optional) How to Update Root CAs on the Android Device
+
+If you are using a self-signed CA, custom enterprise CA, or want the entire Android OS to trust ISRG Root X1:
+
+#### Method A: Install as User Certificate via GUI (No root required)
+1. Download the [ISRG Root X1 PEM / CRT certificate](https://letsencrypt.org/certs/isrgrootx1.pem).
+2. Push the certificate to device storage:
+   ```bash
+   adb push isrgrootx1.pem /sdcard/isrgrootx1.crt
+   ```
+3. On the device, open **Android Settings** $\rightarrow$ **Security** (or **Lock screen and security**).
+4. Tap **Install from storage** (or **Install from SD card**).
+5. Select `isrgrootx1.crt` and name the certificate (e.g. `ISRG Root X1`).
+   *(Note: Android will prompt you to set a lock screen PIN/Pattern if one is not already configured).*
+
+#### Method B: Install into System CA Store via ADB (Rooted devices only)
+If your Frameo device has root access (`adb root`), you can add the certificate permanently to `/system/etc/security/cacerts/` without requiring a lock screen PIN:
+```bash
+# 1. Download certificate
+curl -o isrgrootx1.pem https://letsencrypt.org/certs/isrgrootx1.pem
+
+# 2. Rename to Android's subject hash format (ISRG Root X1 hash is 4042bcee.0)
+cp isrgrootx1.pem 4042bcee.0
+
+# 3. Remount system partition as writable
+adb root
+adb remount
+
+# 4. Push to system certificate directory and set permissions
+adb push 4042bcee.0 /system/etc/security/cacerts/
+adb shell chmod 644 /system/etc/security/cacerts/4042bcee.0
+
+# 5. Reboot device
+adb reboot
+```
+
+---
+
 ## 🏠 Setting as Default Launcher / Home App
 
 ### From App Settings
