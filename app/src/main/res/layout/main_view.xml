@@ -200,12 +200,14 @@
                 </RelativeLayout>
 
                 <LinearLayout
+                    android:id="@+id/infoContentRow"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
 
                     <LinearLayout
+                        android:id="@+id/layoutQrSection"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
