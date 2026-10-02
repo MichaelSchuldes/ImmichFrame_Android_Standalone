@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.app.admin.DeviceAdminReceiver
 import android.content.ComponentName

@@ -1,4 +1,4 @@
-package com.immichframe.immichframe.ui.theme
+package com.immichframe.standalone.ui.theme
 
 import android.app.Activity
 import android.os.Build

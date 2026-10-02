@@ -12,6 +12,7 @@ constraintlayout = "2.2.1"
 retrofit = "3.0.0"
 nanohttpd = "2.3.1"
 preference = "1.2.1"
+zxing = "3.5.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -30,6 +31,7 @@ retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit
 retrofitgson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "retrofit" }
 nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
 androidx-preference = { group = "androidx.preference", name = "preference", version.ref = "preference" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

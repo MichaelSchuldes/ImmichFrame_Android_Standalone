@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.appwidget.AppWidgetManager
 import android.content.Intent

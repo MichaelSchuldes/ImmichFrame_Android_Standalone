@@ -95,24 +95,58 @@ Ensure ADB is installed and developer options / USB debugging is enabled on your
    ```
    *(The `-r` flag reinstalls/updates the existing app while preserving all settings).*
 
+3. **Persistent Settings**:
+   Settings are automatically saved and mirrored to `/sdcard/immichframe_settings.json`. Even if the app is uninstalled or updated, settings are automatically restored upon the next launch. You can also seed or backup settings anytime:
+   ```bash
+   # Pull current settings to your computer
+   adb pull /sdcard/immichframe_settings.json .
+
+   # Push settings to device
+   adb push immichframe_settings.json /sdcard/immichframe_settings.json
+   ```
+
 ---
 
 ## ▶️ How to Launch via ADB
 
+- **Package Name (Application ID)**: `com.immichframe.standalone`
+- **Main Activity**: `com.immichframe.standalone/.MainActivity`
+
 ### Launch the Slideshow App
+
+Start the main slideshow activity directly:
 ```bash
-adb shell monkey -p com.immichframe.immichframe -c android.intent.category.LAUNCHER 1
-```
-*Alternatively, start `MainActivity` directly:*
-```bash
-adb shell am start -n com.immichframe.immichframe/.MainActivity
+adb shell am start -n com.immichframe.standalone/.MainActivity
 ```
 
-### Launch Settings Screen Directly
-If you need to reconfigure the Immich server URL, API key, or display parameters:
+*Alternatively, launch via monkey intent:*
 ```bash
-adb shell am start -n com.immichframe.immichframe/.SettingsActivity
+adb shell monkey -p com.immichframe.standalone -c android.intent.category.LAUNCHER 1
 ```
+
+### Force-Stop or Restart the App
+```bash
+# Force stop
+adb shell am force-stop com.immichframe.standalone
+
+# Restart
+adb shell am force-stop com.immichframe.standalone && adb shell am start -n com.immichframe.standalone/.MainActivity
+```
+
+### Open the Settings Screen
+If you need to reconfigure settings without using the touchscreen:
+- **Via D-Pad Key Event** (triggers Settings in `MainActivity`):
+  ```bash
+  adb shell input keyevent 19    # KEYCODE_DPAD_UP
+  ```
+- **Via Local RPC Server**:
+  ```bash
+  curl -X POST http://<device-ip-address>:53287/settings
+  ```
+- **Via Direct Activity Start** (requires root):
+  ```bash
+  adb shell su -c "am start -n com.immichframe.standalone/.SettingsActivity"
+  ```
 
 ---
 
@@ -167,9 +201,9 @@ adb reboot
 ## 🏠 Setting as Default Launcher / Home App
 
 ### From App Settings
-1. Open ImmichFrame Settings.
+1. Open immichframe-standalone Settings.
 2. Scroll down to **Android Settings**.
-3. Tap **Set as Default Launcher** and choose **ImmichFrame** $\rightarrow$ **Always**.
+3. Tap **Set as Default Launcher** and choose **immichframe-standalone** $\rightarrow$ **Always**.
 
 ### On Dedicated Frames (e.g., Frameo) via ADB
 To prevent the stock Frameo launcher from taking over the Home button on boot, you can disable the stock launcher:

@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import retrofit2.Call
 import retrofit2.http.Body
@@ -24,4 +24,7 @@ interface ImmichApiService {
 
     @GET("api/albums")
     fun getAlbums(): Call<List<ImmichAlbumDto>>
+
+    @GET("api/people")
+    fun getPeople(@Query("withHidden") withHidden: Boolean = true): Call<ImmichPeopleResponse>
 }

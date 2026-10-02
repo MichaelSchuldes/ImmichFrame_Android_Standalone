@@ -1,4 +1,4 @@
-package com.immichframe.immichframe.ui.theme
+package com.immichframe.standalone.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

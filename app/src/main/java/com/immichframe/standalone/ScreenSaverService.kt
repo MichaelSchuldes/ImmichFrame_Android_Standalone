@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
@@ -140,14 +140,17 @@ class ScreenSaverService : DreamService() {
             val isPortrait = finalBitmap.height > finalBitmap.width
             if (isPortrait && currentSettings.layout == "splitview") {
                 if (portraitCache != null) {
-                    var firstPortrait = portraitCache!!.bitmap
-                    firstPortrait = Helpers.reduceBitmapQuality(firstPortrait, maxSize)
-                    finalBitmap = Helpers.reduceBitmapQuality(finalBitmap, maxSize)
+                    val firstPortrait = portraitCache!!.bitmap
+                    val scaled1 = Helpers.reduceBitmapQuality(firstPortrait, maxSize)
+                    val scaled2 = Helpers.reduceBitmapQuality(finalBitmap, maxSize)
 
                     val colorString = currentSettings.primaryColor?.takeIf { it.isNotBlank() } ?: "#FFFFFF"
                     val parsedColor = runCatching { colorString.toColorInt() }.getOrDefault(Color.WHITE)
 
-                    finalBitmap = Helpers.mergeImages(firstPortrait, finalBitmap, parsedColor)
+                    finalBitmap = Helpers.mergeImages(scaled1, scaled2, parsedColor)
+                    if (scaled1 != firstPortrait && !scaled1.isRecycled) scaled1.recycle()
+                    if (scaled2 != display.bitmap && !scaled2.isRecycled) scaled2.recycle()
+                    portraitCache = null
                     isMerged = true
                 } else {
                     portraitCache = display
@@ -155,7 +158,7 @@ class ScreenSaverService : DreamService() {
                     return@launch
                 }
             } else {
-                finalBitmap = Helpers.reduceBitmapQuality(finalBitmap, maxSize * 2)
+                finalBitmap = Helpers.reduceBitmapQuality(finalBitmap, maxSize)
             }
 
             withContext(Dispatchers.Main) {
@@ -181,7 +184,11 @@ class ScreenSaverService : DreamService() {
         imageViewNew.visibility = View.VISIBLE
 
         if (currentSettings.blurredBackground && blurredBitmap != null) {
-            imageViewNew.background = blurredBitmap.toDrawable(resources)
+            val bgDrawable = blurredBitmap.toDrawable(resources).apply {
+                isFilterBitmap = true
+                setDither(true)
+            }
+            imageViewNew.background = bgDrawable
         } else {
             imageViewNew.background = null
         }

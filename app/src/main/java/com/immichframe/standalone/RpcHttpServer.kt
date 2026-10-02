@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import fi.iki.elonen.NanoHTTPD
 
@@ -9,6 +9,7 @@ class RpcHttpServer(
     private val onPauseCommand: () -> Unit,
     private val onSettingsCommand: () -> Unit,
     private val onBrightnessCommand: (Float) -> Unit,
+    private val onInfoCommand: () -> Unit = {},
 ) : NanoHTTPD(53287) {
 
     override fun serve(session: IHTTPSession): Response {
@@ -33,6 +34,10 @@ class RpcHttpServer(
             "/pause" -> {
                 onPauseCommand()
                 newFixedLengthResponse("Pause")
+            }
+            "/info" -> {
+                onInfoCommand()
+                newFixedLengthResponse("Info")
             }
             "/settings" -> {
                 onSettingsCommand()

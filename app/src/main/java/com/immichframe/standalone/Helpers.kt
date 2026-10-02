@@ -1,11 +1,13 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.util.Base64
+import android.util.Log
 import retrofit2.Call
 import retrofit2.http.GET
 import androidx.core.graphics.scale
@@ -58,6 +60,260 @@ object Helpers {
         }
     }
 
+    fun sanitizeDatePattern(pattern: String?, defaultPattern: String = "EEE, MMM d, yyyy"): String {
+        if (pattern.isNullOrBlank()) return defaultPattern
+        // Android 6.0 (API 23) SimpleDateFormat throws IllegalArgumentException on 'Y' (Week Year).
+        // Users commonly type 'YYYY' intending calendar year 'yyyy'.
+        return pattern.replace('Y', 'y')
+    }
+
+    /**
+     * Creates a high-quality, smooth Gaussian blurred background bitmap without blockiness.
+     * Downscales to ~160px width and applies a fast, multi-pass StackBlur algorithm,
+     * then applies a subtle dark scrim so the foreground image stands out crisply.
+     */
+    fun createBlurredBackground(bitmap: Bitmap, targetWidth: Int = 160, blurRadius: Int = 18): Bitmap? {
+        return try {
+            val aspect = bitmap.height.toFloat() / bitmap.width.toFloat()
+            val targetHeight = (targetWidth * aspect).toInt().coerceAtLeast(1)
+            val downscaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+            val blurred = stackBlur(downscaled, blurRadius) ?: downscaled
+
+            // Apply a subtle dark scrim over the blurred canvas to enhance foreground contrast
+            val canvas = Canvas(blurred)
+            val paint = Paint().apply { color = 0x33000000 }
+            canvas.drawRect(0f, 0f, blurred.width.toFloat(), blurred.height.toFloat(), paint)
+
+            blurred
+        } catch (e: Exception) {
+            Log.w("Helpers", "Failed to create blurred background: ${e.message}")
+            null
+        }
+    }
+
+    fun stackBlur(sentBitmap: Bitmap, radius: Int): Bitmap? {
+        if (radius < 1) return null
+
+        val bitmap = sentBitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return null
+        val w = bitmap.width
+        val h = bitmap.height
+
+        val pix = IntArray(w * h)
+        bitmap.getPixels(pix, 0, w, 0, 0, w, h)
+
+        val wm = w - 1
+        val hm = h - 1
+        val wh = w * h
+        val div = radius + radius + 1
+
+        val r = IntArray(wh)
+        val g = IntArray(wh)
+        val b = IntArray(wh)
+        var rsum: Int
+        var gsum: Int
+        var bsum: Int
+        var p: Int
+        var yp: Int
+        var yi: Int
+        var yw: Int
+        val vmin = IntArray(maxOf(w, h))
+
+        var divsum = (div + 1) shr 1
+        divsum *= divsum
+        val dv = IntArray(256 * divsum)
+        for (i in 0 until 256 * divsum) {
+            dv[i] = i / divsum
+        }
+
+        yw = 0
+        yi = 0
+
+        val stack = Array(div) { IntArray(3) }
+        var stackpointer: Int
+        var stackstart: Int
+        var sir: IntArray
+        var rbs: Int
+        val r1 = radius + 1
+        var routsum: Int
+        var goutsum: Int
+        var boutsum: Int
+        var rinsum: Int
+        var ginsum: Int
+        var binsum: Int
+
+        for (y in 0 until h) {
+            rinsum = 0
+            ginsum = 0
+            binsum = 0
+            routsum = 0
+            goutsum = 0
+            boutsum = 0
+            rsum = 0
+            gsum = 0
+            bsum = 0
+            for (i in -radius..radius) {
+                p = pix[yi + minOf(wm, maxOf(i, 0))]
+                sir = stack[i + radius]
+                sir[0] = (p and 0xff0000) shr 16
+                sir[1] = (p and 0x00ff00) shr 8
+                sir[2] = (p and 0x0000ff)
+                rbs = r1 - Math.abs(i)
+                rsum += sir[0] * rbs
+                gsum += sir[1] * rbs
+                bsum += sir[2] * rbs
+                if (i > 0) {
+                    rinsum += sir[0]
+                    ginsum += sir[1]
+                    binsum += sir[2]
+                } else {
+                    routsum += sir[0]
+                    goutsum += sir[1]
+                    boutsum += sir[2]
+                }
+            }
+            stackpointer = radius
+
+            for (x in 0 until w) {
+                r[yi] = dv[rsum]
+                g[yi] = dv[gsum]
+                b[yi] = dv[bsum]
+
+                rsum -= routsum
+                gsum -= goutsum
+                bsum -= boutsum
+
+                stackstart = stackpointer - radius + div
+                sir = stack[stackstart % div]
+
+                routsum -= sir[0]
+                goutsum -= sir[1]
+                boutsum -= sir[2]
+
+                if (y == 0) {
+                    vmin[x] = minOf(x + radius + 1, wm)
+                }
+                p = pix[yw + vmin[x]]
+
+                sir[0] = (p and 0xff0000) shr 16
+                sir[1] = (p and 0x00ff00) shr 8
+                sir[2] = (p and 0x0000ff)
+
+                rinsum += sir[0]
+                ginsum += sir[1]
+                binsum += sir[2]
+
+                rsum += rinsum
+                gsum += ginsum
+                bsum += binsum
+
+                stackpointer = (stackpointer + 1) % div
+                sir = stack[stackpointer % div]
+
+                routsum += sir[0]
+                goutsum += sir[1]
+                boutsum += sir[2]
+
+                rinsum -= sir[0]
+                ginsum -= sir[1]
+                binsum -= sir[2]
+
+                yi++
+            }
+            yw += w
+        }
+
+        for (x in 0 until w) {
+            rinsum = 0
+            ginsum = 0
+            binsum = 0
+            routsum = 0
+            goutsum = 0
+            boutsum = 0
+            rsum = 0
+            gsum = 0
+            bsum = 0
+            yp = -radius * w
+            for (i in -radius..radius) {
+                yi = maxOf(0, yp) + x
+
+                sir = stack[i + radius]
+
+                sir[0] = r[yi]
+                sir[1] = g[yi]
+                sir[2] = b[yi]
+
+                rbs = r1 - Math.abs(i)
+
+                rsum += r[yi] * rbs
+                gsum += g[yi] * rbs
+                bsum += b[yi] * rbs
+
+                if (i > 0) {
+                    rinsum += sir[0]
+                    ginsum += sir[1]
+                    binsum += sir[2]
+                } else {
+                    routsum += sir[0]
+                    goutsum += sir[1]
+                    boutsum += sir[2]
+                }
+
+                if (i < hm) {
+                    yp += w
+                }
+            }
+            yi = x
+            stackpointer = radius
+            for (y in 0 until h) {
+                pix[yi] = (-0x1000000 and pix[yi]) or (dv[rsum] shl 16) or (dv[gsum] shl 8) or dv[bsum]
+
+                rsum -= routsum
+                gsum -= goutsum
+                bsum -= boutsum
+
+                stackstart = stackpointer - radius + div
+                sir = stack[stackstart % div]
+
+                routsum -= sir[0]
+                goutsum -= sir[1]
+                boutsum -= sir[2]
+
+                if (x == 0) {
+                    vmin[y] = minOf(y + r1, hm) * w
+                }
+                p = x + vmin[y]
+
+                sir[0] = r[p]
+                sir[1] = g[p]
+                sir[2] = b[p]
+
+                rinsum += sir[0]
+                ginsum += sir[1]
+                binsum += sir[2]
+
+                rsum += rinsum
+                gsum += ginsum
+                bsum += binsum
+
+                stackpointer = (stackpointer + 1) % div
+                sir = stack[stackpointer]
+
+                routsum += sir[0]
+                goutsum += sir[1]
+                boutsum += sir[2]
+
+                rinsum -= sir[0]
+                ginsum -= sir[1]
+                binsum -= sir[2]
+
+                yi += w
+            }
+        }
+
+        bitmap.setPixels(pix, 0, w, 0, 0, w, h)
+        return bitmap
+    }
+
     fun mergeImages(leftImage: Bitmap, rightImage: Bitmap, lineColor: Int): Bitmap {
         val lineWidth = 10
         val targetHeight = maxOf(leftImage.height, rightImage.height) // Use max height
@@ -95,15 +351,53 @@ object Helpers {
     fun reduceBitmapQuality(bitmap: Bitmap, maxSize: Int = 1000): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
+        val maxDim = maxOf(width, height)
+        if (maxDim <= maxSize) {
+            return bitmap
+        }
 
-        // Calculate new dimensions while maintaining aspect ratio
-        val scaleFactor = maxSize.toFloat() / width.coerceAtLeast(height)
-        val newWidth = (width * scaleFactor).toInt()
-        val newHeight = (height * scaleFactor).toInt()
+        // Downscale while maintaining aspect ratio
+        val scaleFactor = maxSize.toFloat() / maxDim
+        val newWidth = (width * scaleFactor).toInt().coerceAtLeast(1)
+        val newHeight = (height * scaleFactor).toInt().coerceAtLeast(1)
 
-        val resizedBitmap = bitmap.scale(newWidth, newHeight)
+        return try {
+            Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        } catch (e: OutOfMemoryError) {
+            android.util.Log.e("Helpers", "OOM in reduceBitmapQuality: ${e.message}")
+            bitmap
+        }
+    }
 
-        return resizedBitmap
+    fun generateQrCodeBitmap(content: String, sizePx: Int = 300): Bitmap? {
+        return try {
+            val hints = java.util.EnumMap<com.google.zxing.EncodeHintType, Any>(com.google.zxing.EncodeHintType::class.java).apply {
+                put(com.google.zxing.EncodeHintType.MARGIN, 1)
+                put(com.google.zxing.EncodeHintType.ERROR_CORRECTION, com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M)
+            }
+            val bitMatrix = com.google.zxing.qrcode.QRCodeWriter().encode(
+                content,
+                com.google.zxing.BarcodeFormat.QR_CODE,
+                sizePx,
+                sizePx,
+                hints
+            )
+            val width = bitMatrix.width
+            val height = bitMatrix.height
+            val pixels = IntArray(width * height)
+            for (y in 0 until height) {
+                val offset = y * width
+                for (x in 0 until width) {
+                    pixels[offset + x] = if (bitMatrix.get(x, y)) Color.BLACK else Color.WHITE
+                }
+            }
+            val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+            bmp.setPixels(pixels, 0, width, 0, 0, width, height)
+            bmp
+        } catch (e: Exception) {
+            android.util.Log.e("Helpers", "Failed to generate QR code: ${e.message}", e)
+            null
+        }
     }
 
     data class ImageResponse(

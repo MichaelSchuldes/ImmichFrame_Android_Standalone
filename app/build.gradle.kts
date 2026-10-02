@@ -9,6 +9,15 @@ plugins {
 
 android {
     signingConfigs {
+        getByName("debug") {
+            val debugKeystore = rootProject.file("debug.keystore")
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         create("Release") {
             val propertiesFile = rootProject.file("signing.properties")
             if (propertiesFile.exists()) {
@@ -24,7 +33,7 @@ android {
             }
         }
     }
-    namespace = "com.immichframe.immichframe"
+    namespace = "com.immichframe.standalone"
     compileSdk = 36
 
     base {
@@ -32,7 +41,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.immichframe.immichframe"
+        applicationId = "com.immichframe.standalone"
         minSdk = 23
         targetSdk = 36
         versionCode = 50
@@ -40,6 +49,9 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(
@@ -81,4 +93,5 @@ dependencies {
     implementation(libs.retrofitgson)
     implementation(libs.nanohttpd)
     implementation(libs.androidx.preference)
+    implementation(libs.zxing.core)
 }

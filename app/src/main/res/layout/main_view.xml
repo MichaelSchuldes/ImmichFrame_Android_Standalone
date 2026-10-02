@@ -1,14 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/swipeRefreshLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@color/black">
+    android:layout_height="match_parent"
+    android:background="@color/black">
 
         <WebView
             android:id="@+id/webView"
@@ -30,33 +25,91 @@
             android:visibility="gone"
             tools:ignore="ContentDescription" />
 
-        <TextView
-            android:id="@+id/txtPhotoInfo"
+        <LinearLayout
+            android:id="@+id/layoutPhotoInfo"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|end"
-            android:background="@android:color/transparent"
-            android:gravity="end"
-            android:padding="8dp"
-            android:shadowColor="#99000000"
-            android:shadowDx="2"
-            android:shadowDy="2"
-            android:shadowRadius="4"
-            android:text=""
-            android:textSize="16sp"
-            android:visibility="gone" />
+            android:layout_margin="16dp"
+            android:background="@drawable/bg_text_overlay"
+            android:orientation="vertical"
+            android:gravity="start"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/layoutPhotoDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/imgPhotoDateIcon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginEnd="8dp"
+                    android:src="@drawable/ic_calendar"
+                    android:tint="#FFFFFF"
+                    android:contentDescription="Date" />
+
+                <TextView
+                    android:id="@+id/txtPhotoDate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="start"
+                    android:textColor="#FFFFFF"
+                    android:shadowColor="#FF000000"
+                    android:shadowDx="1.5"
+                    android:shadowDy="1.5"
+                    android:shadowRadius="4"
+                    android:textSize="16sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/layoutPhotoLocation"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/imgPhotoLocationIcon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginEnd="8dp"
+                    android:src="@drawable/ic_place_pin"
+                    android:tint="#FFFFFF"
+                    android:contentDescription="Location" />
+
+                <TextView
+                    android:id="@+id/txtPhotoLocation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="start"
+                    android:textColor="#FFFFFF"
+                    android:shadowColor="#FF000000"
+                    android:shadowDx="1.5"
+                    android:shadowDy="1.5"
+                    android:shadowRadius="4"
+                    android:textSize="16sp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/txtDateTime"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|start"
-            android:background="@android:color/transparent"
+            android:layout_margin="16dp"
+            android:background="@drawable/bg_text_overlay"
             android:gravity="center"
-            android:padding="8dp"
-            android:shadowColor="#99000000"
-            android:shadowDx="2"
-            android:shadowDy="2"
+            android:textColor="#FFFFFF"
+            android:shadowColor="#FF000000"
+            android:shadowDx="1.5"
+            android:shadowDy="1.5"
             android:shadowRadius="4"
             android:text=""
             android:textSize="16sp"
@@ -95,5 +148,166 @@
             android:alpha="0"
             android:background="#000000"
             android:visibility="gone" />
-    </FrameLayout>
-</androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+        <FrameLayout
+            android:id="@+id/infoOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#A0000000"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/infoCardContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_margin="24dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_info_overlay"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="20dp">
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp">
+
+                    <TextView
+                        android:id="@+id/txtInfoTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentStart="true"
+                        android:layout_centerVertical="true"
+                        android:layout_toStartOf="@+id/btnInfoClose"
+                        android:text="Photo Details"
+                        android:textColor="#FFFFFF"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <ImageButton
+                        android:id="@+id/btnInfoClose"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@android:drawable/ic_menu_close_clear_cancel"
+                        android:tint="#CCCCCC"
+                        android:contentDescription="Close" />
+                </RelativeLayout>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:gravity="center_horizontal"
+                        android:layout_marginEnd="20dp">
+
+                        <ImageView
+                            android:id="@+id/imgQrCode"
+                            android:layout_width="160dp"
+                            android:layout_height="160dp"
+                            android:background="@drawable/bg_qr_frame"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="QR Code" />
+
+                        <TextView
+                            android:id="@+id/txtQrAction"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Scan to open in Immich"
+                            android:textColor="#AAAAAA"
+                            android:textSize="12sp"
+                            android:gravity="center" />
+                    </LinearLayout>
+
+                    <ScrollView
+                        android:layout_width="320dp"
+                        android:layout_height="wrap_content"
+                        android:maxHeight="300dp">
+
+                        <TextView
+                            android:id="@+id/txtInfoDetails"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:lineSpacingExtra="4dp"
+                            android:textColor="#E0E0E0"
+                            android:textSize="13sp" />
+                    </ScrollView>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/txtInfoUrl"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textColor="#64B5F6"
+                    android:textSize="11sp"
+                    android:gravity="center"
+                    android:ellipsize="middle"
+                    android:singleLine="true" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Settings Indicator Pill / Badge that appears when swiping down from top -->
+        <FrameLayout
+            android:id="@+id/settingsIndicator"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_settings_badge"
+            android:elevation="6dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/imgSettingsGear"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_settings_gear"
+                android:contentDescription="Settings" />
+        </FrameLayout>
+
+        <!-- Offline Indicator Bubble in top-left corner -->
+        <LinearLayout
+            android:id="@+id/layoutOfflineIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_margin="16dp"
+            android:background="@drawable/bg_offline_bubble"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:elevation="6dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/imgOfflineIcon"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginEnd="6dp"
+                android:src="@drawable/ic_wifi_off"
+                android:contentDescription="Offline" />
+
+            <TextView
+                android:id="@+id/txtOfflineStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:text="Offline · Cycling cache" />
+        </LinearLayout>
+</FrameLayout>

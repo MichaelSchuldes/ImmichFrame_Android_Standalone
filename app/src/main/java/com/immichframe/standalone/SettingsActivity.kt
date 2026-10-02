@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity

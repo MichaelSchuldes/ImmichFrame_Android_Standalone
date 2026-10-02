@@ -7,6 +7,6 @@
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
     android:widgetCategory="home_screen"
-    android:configure="com.immichframe.immichframe.WidgetConfigActivity"
+    android:configure="com.immichframe.standalone.WidgetConfigActivity"
     android:widgetFeatures="configuration_optional|reconfigurable">
 </appwidget-provider>

@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.app.Activity
 import android.app.admin.DevicePolicyManager
@@ -35,6 +35,44 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val apiKeyPref = findPreference<EditTextPreference>("immich_api_key")
         apiKeyPref?.setOnBindEditTextListener { editText ->
             editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+
+        // Live preview and automatic sanitization (e.g. YYYY -> yyyy) for photo date format
+        val photoDateFormatPref = findPreference<EditTextPreference>("photoDateFormat")
+        photoDateFormatPref?.summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
+            val text = pref.text
+            if (text.isNullOrBlank()) {
+                "Not set (default: EEE, MMM d, yyyy)"
+            } else {
+                val sanitized = Helpers.sanitizeDatePattern(text)
+                try {
+                    val sample = java.text.SimpleDateFormat(sanitized, Locale.getDefault()).format(java.util.Date())
+                    "$text (Preview: $sample)"
+                } catch (_: Exception) {
+                    text
+                }
+            }
+        }
+        photoDateFormatPref?.setOnPreferenceChangeListener { _, newValue ->
+            val str = newValue as? String ?: return@setOnPreferenceChangeListener true
+            val sanitized = Helpers.sanitizeDatePattern(str)
+            if (sanitized != str) {
+                photoDateFormatPref.text = sanitized
+                false
+            } else {
+                true
+            }
+        }
+
+        val recentDaysPref = findPreference<EditTextPreference>("filter_recent_days")
+        recentDaysPref?.summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
+            val text = pref.text
+            val days = text?.toIntOrNull() ?: 0
+            if (days > 0) {
+                "Only photos from the last $days days"
+            } else {
+                "All photos (no date limit)"
+            }
         }
 
         // Test connection button
@@ -239,5 +277,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         } else {
             "Allow the frame to turn off the screen and sleep the device during inactive hours"
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        SettingsBackupHelper.backup(requireContext())
     }
 }

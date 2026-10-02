@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -19,7 +19,7 @@ class ScheduleWakeReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        const val ACTION_WAKE = "com.immichframe.immichframe.ACTION_SCHEDULE_WAKE"
+        const val ACTION_WAKE = "com.immichframe.standalone.ACTION_SCHEDULE_WAKE"
         const val REQUEST_CODE = 4711
     }
 }

@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -6,7 +6,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.preference.PreferenceManager
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -24,6 +27,7 @@ import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
@@ -57,18 +61,44 @@ class ImmichManager(private val context: Context) {
         val imageLocationFormat: String,
         val primaryColor: String?,
         val secondaryColor: String?,
-        val baseFontSize: String?
+        val baseFontSize: String?,
+        val recentDays: Int = 0
     )
 
     private val assetQueue = Collections.synchronizedList(mutableListOf<ImmichAsset>())
+    private val prefetchedQueue = Collections.synchronizedList(mutableListOf<ImmichImageDisplay>())
     private val history = Collections.synchronizedList(mutableListOf<ImmichImageDisplay>())
     private var historyIndex = -1
+    private var offlineIndex = -1
+
+    @Volatile
+    var isOnline: Boolean = true
+        private set
+
+    var onOnlineStatusChanged: ((Boolean) -> Unit)? = null
+
+    private val prefetchScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    @Volatile
+    private var isPrefetching = false
+    @Volatile
     private var isFetchingAssets = false
 
     @Volatile
     private var albumCache: Map<String, String>? = null
     @Volatile
     private var albumCacheTime = 0L
+    @Volatile
+    private var albumAssetCountCache: Map<String, Int> = emptyMap()
+
+    @Volatile
+    private var peopleCache: Map<String, String>? = null
+    @Volatile
+    private var peopleCacheTime = 0L
+
+    @Volatile
+    private var lastServerUrl: String = ""
+    @Volatile
+    private var lastApiKey: String = ""
 
     private val okHttpClient: OkHttpClient = buildOkHttpClient()
 
@@ -123,8 +153,9 @@ class ImmichManager(private val context: Context) {
         val showClock = prefs.getBoolean("showClock", true)
         val showCurrent = prefs.getBoolean("showCurrentDate", true)
 
-        val photoDateFormat = prefs.getString("photoDateFormat", "EEE, MMM d, yyyy")
-            ?.takeIf { it.isNotBlank() } ?: "EEE, MMM d, yyyy"
+        val photoDateFormat = Helpers.sanitizeDatePattern(
+            prefs.getString("photoDateFormat", "EEE, MMM d, yyyy")?.takeIf { it.isNotBlank() }
+        )
 
         val clockFormat = prefs.getString("clockFormat", "h:mm a")
             ?.takeIf { it.isNotBlank() } ?: "h:mm a"
@@ -135,6 +166,9 @@ class ImmichManager(private val context: Context) {
         val primaryColor = prefs.getString("primaryColor", "#FFFFFF")
         val secondaryColor = prefs.getString("secondaryColor", "#000000")
         val baseFontSize = prefs.getString("baseFontSize", "24px")
+
+        val recentDaysStr = prefs.getString("filter_recent_days", "") ?: ""
+        val recentDays = recentDaysStr.trim().toIntOrNull()?.coerceAtLeast(0) ?: 0
 
         return FrameSettings(
             serverUrl = normalizeUrl(url),
@@ -160,7 +194,8 @@ class ImmichManager(private val context: Context) {
             imageLocationFormat = locFormat,
             primaryColor = primaryColor,
             secondaryColor = secondaryColor,
-            baseFontSize = baseFontSize
+            baseFontSize = baseFontSize,
+            recentDays = recentDays
         )
     }
 
@@ -230,7 +265,8 @@ class ImmichManager(private val context: Context) {
             imageLocationFormat = "",
             primaryColor = null,
             secondaryColor = null,
-            baseFontSize = null
+            baseFontSize = null,
+            recentDays = 0
         )
 
         val apiService = createApiService(testSettings)
@@ -273,66 +309,216 @@ class ImmichManager(private val context: Context) {
         })
     }
 
+    fun setOnlineStatus(online: Boolean) {
+        if (isOnline != online) {
+            isOnline = online
+            Log.d("ImmichManager", "Connection status changed: isOnline=$online")
+            onOnlineStatusChanged?.invoke(online)
+            if (online) {
+                triggerPrefetch()
+            }
+        }
+    }
+
     suspend fun getNextImage(): ImmichImageDisplay? = withContext(Dispatchers.IO) {
         val settings = getSettings()
         if (settings.serverUrl.isBlank()) {
             return@withContext null
         }
 
-        // If walking forward through existing history
-        if (historyIndex + 1 < history.size) {
-            historyIndex++
-            return@withContext history[historyIndex]
-        }
-
-        // Ensure we have assets in the queue
-        if (assetQueue.isEmpty()) {
-            fetchAssetsBatch(settings)
-        }
-
-        // Trigger pre-fetching next batch if queue is running low
-        if (assetQueue.size < 5) {
-            triggerBackgroundFetch(settings)
-        }
-
-        var attempts = 0
-        while (assetQueue.isNotEmpty() && attempts < 10) {
-            attempts++
-            val asset = assetQueue.removeAt(0)
-            val display = downloadAndBuildDisplay(asset, settings)
-            if (display != null) {
-                history.add(display)
-                if (history.size > 200) {
-                    val removed = history.removeAt(0)
-                    if (!removed.bitmap.isRecycled && removed != display) {
-                        // Do not recycle immediately if still referenced, but manage memory
-                    }
-                }
-                historyIndex = history.size - 1
-                return@withContext display
+        // 1. If walking forward through existing history
+        synchronized(history) {
+            if (historyIndex + 1 < history.size) {
+                historyIndex++
+                return@withContext history[historyIndex]
             }
+        }
+
+        // 2. If an image is ready in prefetchedQueue, display it immediately (0ms delay!)
+        var display: ImmichImageDisplay? = null
+        synchronized(prefetchedQueue) {
+            if (prefetchedQueue.isNotEmpty()) {
+                display = prefetchedQueue.removeAt(0)
+            }
+        }
+
+        if (display != null) {
+            addToHistory(display!!, isOnline)
+            triggerPrefetch()
+            return@withContext display
+        }
+
+        // 3. If offline (or network is failing), cycle cached images
+        if (!isOnline) {
+            val offlineDisplay = getNextOfflineImage()
+            if (offlineDisplay != null) {
+                return@withContext offlineDisplay
+            }
+        }
+
+        // 4. If online and queue was empty (cold start), download one directly and launch prefetch
+        ensureAssetsAvailable(settings)
+        display = downloadNextAssetDisplay(settings)
+        if (display != null) {
+            addToHistory(display!!, isOnline)
+            triggerPrefetch()
+            return@withContext display
+        }
+
+        // 5. If online fetch failed (e.g. lost connection), fallback to cycling cached images
+        val fallback = getNextOfflineImage()
+        if (fallback != null) {
+            setOnlineStatus(false)
+            return@withContext fallback
         }
 
         return@withContext null
     }
 
     suspend fun getPreviousImage(): ImmichImageDisplay? = withContext(Dispatchers.IO) {
-        if (historyIndex > 0) {
-            historyIndex--
-            return@withContext history[historyIndex]
+        if (!isOnline) {
+            val offlineDisplay = getPreviousOfflineImage()
+            if (offlineDisplay != null) {
+                return@withContext offlineDisplay
+            }
         }
-        return@withContext if (history.isNotEmpty()) history[0] else null
+
+        synchronized(history) {
+            if (historyIndex > 0) {
+                historyIndex--
+                return@withContext history[historyIndex]
+            }
+            return@withContext if (history.isNotEmpty()) history[0] else null
+        }
     }
 
-    private fun triggerBackgroundFetch(settings: FrameSettings) {
-        if (isFetchingAssets) return
-        Thread {
-            try {
-                fetchAssetsBatch(settings)
-            } catch (e: Exception) {
-                Log.w("ImmichManager", "Background fetch failed: ${e.message}")
+    private fun getNextOfflineImage(): ImmichImageDisplay? {
+        val pool = getCachedPool()
+        if (pool.isEmpty()) return null
+        offlineIndex = (offlineIndex + 1) % pool.size
+        return pool[offlineIndex]
+    }
+
+    private fun getPreviousOfflineImage(): ImmichImageDisplay? {
+        val pool = getCachedPool()
+        if (pool.isEmpty()) return null
+        offlineIndex = if (offlineIndex <= 0) pool.size - 1 else offlineIndex - 1
+        return pool[offlineIndex]
+    }
+
+    fun getCachedPool(): List<ImmichImageDisplay> {
+        val pool = mutableListOf<ImmichImageDisplay>()
+        synchronized(history) { pool.addAll(history) }
+        synchronized(prefetchedQueue) { pool.addAll(prefetchedQueue) }
+        return pool.distinctBy { it.assetId }
+    }
+
+    private fun addToHistory(display: ImmichImageDisplay, online: Boolean) {
+        synchronized(history) {
+            history.add(display)
+            // When online, keep at least MIN_HISTORY_KEEP (5) in history, trim past MAX_HISTORY_KEEP (8)
+            // When offline, do NOT trim so all cached images can be cycled!
+            if (online && history.size > MAX_HISTORY_KEEP) {
+                val removed = history.removeAt(0)
+                val isStillInUse = history.contains(removed) || prefetchedQueue.contains(removed)
+                if (!isStillInUse) {
+                    if (!removed.bitmap.isRecycled) {
+                        removed.bitmap.recycle()
+                    }
+                    removed.blurredBackground?.let {
+                        if (!it.isRecycled) it.recycle()
+                    }
+                }
             }
-        }.start()
+            historyIndex = history.size - 1
+        }
+    }
+
+    fun triggerPrefetch() {
+        if (isPrefetching) return
+        prefetchScope.launch {
+            prefetchNextImages()
+        }
+    }
+
+    private fun prefetchNextImages() {
+        if (isPrefetching) return
+        isPrefetching = true
+        try {
+            val settings = getSettings()
+            if (settings.serverUrl.isBlank()) return
+
+            while (prefetchedQueue.size < PREFETCH_TARGET) {
+                if (assetQueue.isEmpty()) {
+                    fetchAssetsBatch(settings)
+                }
+                if (assetQueue.isEmpty()) {
+                    break
+                }
+
+                val asset = synchronized(assetQueue) {
+                    if (assetQueue.isNotEmpty()) assetQueue.removeAt(0) else null
+                } ?: break
+
+                val display = downloadAndBuildDisplay(asset, settings)
+                if (display != null) {
+                    synchronized(prefetchedQueue) {
+                        prefetchedQueue.add(display)
+                    }
+                    Log.d("ImmichManager", "Prefetched asset ${display.assetId} (queue: ${prefetchedQueue.size}/$PREFETCH_TARGET)")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ImmichManager", "Prefetch loop error: ${e.message}")
+            if (e is java.io.IOException) {
+                setOnlineStatus(false)
+            }
+        } finally {
+            isPrefetching = false
+        }
+    }
+
+    private fun downloadNextAssetDisplay(settings: FrameSettings): ImmichImageDisplay? {
+        var attempts = 0
+        while (assetQueue.isNotEmpty() && attempts < 10) {
+            attempts++
+            val asset = synchronized(assetQueue) {
+                if (assetQueue.isNotEmpty()) assetQueue.removeAt(0) else null
+            } ?: break
+            val display = downloadAndBuildDisplay(asset, settings)
+            if (display != null) {
+                return display
+            }
+        }
+        return null
+    }
+
+    private fun ensureAssetsAvailable(settings: FrameSettings) {
+        if (assetQueue.isEmpty()) {
+            fetchAssetsBatch(settings)
+        }
+    }
+
+    fun clearCache() {
+        synchronized(prefetchedQueue) {
+            for (item in prefetchedQueue) {
+                if (!item.bitmap.isRecycled) item.bitmap.recycle()
+                item.blurredBackground?.let { if (!it.isRecycled) it.recycle() }
+            }
+            prefetchedQueue.clear()
+        }
+        synchronized(assetQueue) {
+            assetQueue.clear()
+        }
+        synchronized(history) {
+            while (history.size > MIN_HISTORY_KEEP) {
+                val removed = history.removeAt(0)
+                if (!removed.bitmap.isRecycled) removed.bitmap.recycle()
+                removed.blurredBackground?.let { if (!it.isRecycled) it.recycle() }
+            }
+            historyIndex = history.size - 1
+        }
+        triggerPrefetch()
     }
 
     private fun fetchAssetsBatch(settings: FrameSettings) {
@@ -341,8 +527,35 @@ class ImmichManager(private val context: Context) {
         try {
             val apiService = createApiService(settings) ?: return
 
-            // 1. Memories check (if enabled and queue is empty)
-            if (settings.includeMemories && assetQueue.isEmpty()) {
+            // Invalidate cache if credentials or server changed
+            if (settings.serverUrl != lastServerUrl || settings.apiKey != lastApiKey) {
+                albumCache = null
+                peopleCache = null
+                lastServerUrl = settings.serverUrl
+                lastApiKey = settings.apiKey
+            }
+
+            // Resolve excluded person IDs ahead of time
+            val resolvedExcludedIds = if (settings.excludedPeople.isNotEmpty()) {
+                resolvePersonIds(apiService, settings.excludedPeople).toSet()
+            } else {
+                emptySet()
+            }
+
+            val takenAfterIso: String? = if (settings.recentDays > 0) {
+                val cal = java.util.Calendar.getInstance()
+                cal.add(java.util.Calendar.DAY_OF_YEAR, -settings.recentDays)
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+                sdf.timeZone = TimeZone.getTimeZone("UTC")
+                sdf.format(cal.time)
+            } else null
+
+            val cutoffMillis: Long = if (settings.recentDays > 0) {
+                System.currentTimeMillis() - (settings.recentDays.toLong() * 24L * 60L * 60L * 1000L)
+            } else 0L
+
+            // 1. Memories check (if enabled and queue is empty, and NOT restricted to recent days)
+            if (settings.includeMemories && settings.recentDays <= 0 && assetQueue.isEmpty()) {
                 try {
                     val memResponse = apiService.getMemories().execute()
                     if (memResponse.isSuccessful && memResponse.body() != null) {
@@ -352,18 +565,14 @@ class ImmichManager(private val context: Context) {
                                 curYear - y
                             }
                             for (asset in memory.assets) {
-                                if (yearsAgo != null) {
-                                    val currentExif = asset.exifInfo ?: ImmichExifInfo()
-                                    val desc = "$yearsAgo ${if (yearsAgo == 1) "year" else "years"} ago"
-                                    val updatedAsset = asset.copy(
-                                        exifInfo = currentExif.copy(description = desc)
-                                    )
-                                    if (!containsExcludedPerson(updatedAsset, settings.excludedPeople)) {
+                                val currentExif = asset.exifInfo ?: ImmichExifInfo()
+                                val desc = if (yearsAgo != null) "$yearsAgo ${if (yearsAgo == 1) "year" else "years"} ago" else currentExif.description
+                                val updatedAsset = asset.copy(
+                                    exifInfo = currentExif.copy(description = desc)
+                                )
+                                if (!containsExcludedPerson(updatedAsset, settings.excludedPeople, resolvedExcludedIds)) {
+                                    synchronized(assetQueue) {
                                         assetQueue.add(updatedAsset)
-                                    }
-                                } else {
-                                    if (!containsExcludedPerson(asset, settings.excludedPeople)) {
-                                        assetQueue.add(asset)
                                     }
                                 }
                             }
@@ -374,71 +583,154 @@ class ImmichManager(private val context: Context) {
                 }
             }
 
-            // 2. Metadata Search (Albums, People, Tags, Favorites)
-            val hasCustomFilters = settings.favoritesOnly ||
-                    settings.albumIds.isNotEmpty() ||
-                    settings.personIds.isNotEmpty() ||
-                    settings.tagIds.isNotEmpty()
+            // 2. Random Search from Full List of Pictures
+            val resolvedAlbumIds = if (settings.albumIds.isNotEmpty()) {
+                resolveAlbumIds(apiService, settings.albumIds)
+            } else emptyList()
 
-            if (hasCustomFilters) {
-                val resolvedAlbumIds = resolveAlbumIds(apiService, settings.albumIds)
+            val resolvedPersonIds = if (settings.personIds.isNotEmpty()) {
+                resolvePersonIds(apiService, settings.personIds)
+            } else emptyList()
+
+            // If user specified an album filter, but no matching albums were found, abort query
+            if (settings.albumIds.isNotEmpty() && resolvedAlbumIds.isEmpty()) {
+                Log.w("ImmichManager", "Could not resolve any album IDs for ${settings.albumIds}. Aborting query.")
+                return
+            }
+
+            // If user specified a person filter, but no matching people were found, abort query
+            if (settings.personIds.isNotEmpty() && resolvedPersonIds.isEmpty()) {
+                Log.w("ImmichManager", "Could not resolve any person IDs for ${settings.personIds}. Aborting query.")
+                return
+            }
+
+            // Immich /api/search/random samples uniformly across the full matching collection of pictures!
+            val randomDto = RandomSearchDto(
+                size = 50,
+                type = "IMAGE",
+                withExif = true,
+                withPeople = true,
+                takenAfter = takenAfterIso,
+                albumIds = resolvedAlbumIds.takeIf { it.isNotEmpty() },
+                personIds = resolvedPersonIds.takeIf { it.isNotEmpty() },
+                tagIds = settings.tagIds.takeIf { it.isNotEmpty() },
+                isFavorite = if (settings.favoritesOnly) true else null,
+                visibility = if (resolvedAlbumIds.isEmpty()) "timeline" else null
+            )
+
+            val response = apiService.getRandomAssets(randomDto).execute()
+            var fetchedAssets: List<ImmichAsset>? = null
+            if (response.isSuccessful && response.body() != null) {
+                fetchedAssets = response.body()
+                setOnlineStatus(true)
+            } else {
+                Log.w("ImmichManager", "getRandomAssets returned code ${response.code()}, attempting metadata fallback...")
+                // Fallback for older servers that might not support albumIds in search/random
+                val totalAssetsInAlbums = resolvedAlbumIds.sumOf { albumAssetCountCache[it.lowercase()] ?: 0 }
+                val maxAlbumPages = if (totalAssetsInAlbums > 0) ((totalAssetsInAlbums + 99) / 100).coerceAtLeast(1) else 1
+                val targetPage = if (settings.recentDays > 0 || maxAlbumPages <= 1) 1 else (1..maxAlbumPages).random()
 
                 val metadataDto = MetadataSearchDto(
-                    page = 1,
-                    size = 100,
+                    page = targetPage,
+                    size = 50,
                     type = "IMAGE",
                     isFavorite = if (settings.favoritesOnly) true else null,
                     albumIds = resolvedAlbumIds.takeIf { it.isNotEmpty() },
-                    personIds = settings.personIds.takeIf { it.isNotEmpty() },
+                    personIds = resolvedPersonIds.takeIf { it.isNotEmpty() },
                     tagIds = settings.tagIds.takeIf { it.isNotEmpty() },
                     withExif = true,
-                    withPeople = true
-                )
-
-                val response = apiService.searchMetadata(metadataDto).execute()
-                if (response.isSuccessful && response.body() != null) {
-                    val items = response.body()!!.assets.items.toMutableList()
-                    items.shuffle()
-                    val filtered = items.filterNot { containsExcludedPerson(it, settings.excludedPeople) }
-                    assetQueue.addAll(filtered)
-                }
-            } else {
-                // 3. Random Search (Timeline)
-                val randomDto = RandomSearchDto(
-                    size = 30,
-                    type = "IMAGE",
-                    withExif = true,
                     withPeople = true,
-                    visibility = "timeline"
+                    takenAfter = takenAfterIso
                 )
-
-                val response = apiService.getRandomAssets(randomDto).execute()
-                if (response.isSuccessful && response.body() != null) {
-                    val filtered = response.body()!!.filterNot { containsExcludedPerson(it, settings.excludedPeople) }
-                    assetQueue.addAll(filtered)
+                val metaResp = apiService.searchMetadata(metadataDto).execute()
+                if (metaResp.isSuccessful && metaResp.body() != null) {
+                    fetchedAssets = metaResp.body()!!.assets.items
+                    setOnlineStatus(true)
                 }
             }
+
+            if (fetchedAssets != null) {
+                val filtered = fetchedAssets
+                    .filterNot { containsExcludedPerson(it, settings.excludedPeople, resolvedExcludedIds) }
+                    .filter { isWithinRecentDays(it, settings.recentDays, cutoffMillis) }
+                    .shuffled()
+
+                synchronized(assetQueue) {
+                    assetQueue.addAll(filtered)
+                }
+                Log.d("ImmichManager", "Fetched and queued ${filtered.size} assets from full collection.")
+            }
         } catch (e: Exception) {
-            Log.e("ImmichManager", "Error fetching assets batch: ${e.message}")
+            Log.e("ImmichManager", "Error fetching assets batch: ${e.message}", e)
+            if (e is java.io.IOException) {
+                setOnlineStatus(false)
+            }
         } finally {
             isFetchingAssets = false
         }
     }
 
-    private fun containsExcludedPerson(asset: ImmichAsset, excludedList: List<String>): Boolean {
+    private fun isWithinRecentDays(asset: ImmichAsset, recentDays: Int, cutoffMillis: Long): Boolean {
+        if (recentDays <= 0) return true
+        val dateStr = asset.exifInfo?.dateTimeOriginal
+            ?: asset.localDateTime
+            ?: asset.fileCreatedAt
+            ?: return true
+        val millis = parseDateToMillis(dateStr) ?: return true
+        return millis >= cutoffMillis
+    }
+
+    private fun parseDateToMillis(dateStr: String): Long? {
+        val formats = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy:MM:dd HH:mm:ss",
+            "yyyy-MM-dd"
+        )
+        for (fmt in formats) {
+            try {
+                val sdf = SimpleDateFormat(fmt, Locale.US)
+                if (fmt.endsWith("'Z'")) {
+                    sdf.timeZone = TimeZone.getTimeZone("UTC")
+                }
+                val d = sdf.parse(dateStr)
+                if (d != null) return d.time
+            } catch (_: Exception) {
+            }
+        }
+        return null
+    }
+
+    private fun containsExcludedPerson(
+        asset: ImmichAsset,
+        excludedList: List<String>,
+        resolvedExcludedIds: Set<String> = emptySet()
+    ): Boolean {
         if (excludedList.isEmpty()) return false
         val people = asset.people ?: return false
         for (person in people) {
             val personId = person.id.trim()
             val personName = person.name?.trim() ?: ""
+            val personNameLower = personName.lowercase()
+
+            if (resolvedExcludedIds.contains(personId)) {
+                Log.d("ImmichManager", "Filtered out asset ${asset.id}: contains excluded person ID $personId (${if (personName.isNotEmpty()) personName else "unnamed"})")
+                return true
+            }
+
             for (target in excludedList) {
                 val t = target.trim()
-                if (t.isNotEmpty()) {
-                    if (personId.equals(t, ignoreCase = true) ||
-                        personName.equals(t, ignoreCase = true) ||
-                        (personName.isNotEmpty() && personName.contains(t, ignoreCase = true))) {
-                        return true
-                    }
+                if (t.isEmpty()) continue
+                val tLower = t.lowercase()
+
+                if (personId.equals(t, ignoreCase = true) ||
+                    personNameLower == tLower ||
+                    (personNameLower.isNotEmpty() && (personNameLower.contains(tLower) || tLower.contains(personNameLower)))) {
+                    Log.d("ImmichManager", "Filtered out asset ${asset.id}: contains excluded person '$t' (matched: $personName)")
+                    return true
                 }
             }
         }
@@ -450,25 +742,30 @@ class ImmichManager(private val context: Context) {
 
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         val needsResolution = inputs.any { !uuidRegex.matches(it.trim()) }
-        if (!needsResolution) {
-            return inputs
-        }
 
         val now = System.currentTimeMillis()
-        if (albumCache == null || now - albumCacheTime > 10 * 60 * 1000L) {
+        if (albumCache == null || (needsResolution && (now - albumCacheTime > 10 * 60 * 1000L))) {
             try {
                 val response = apiService.getAlbums().execute()
                 if (response.isSuccessful && response.body() != null) {
                     val map = mutableMapOf<String, String>()
+                    val countMap = mutableMapOf<String, Int>()
                     for (album in response.body()!!) {
+                        val count = album.assetCount ?: 0
                         val name = album.albumName?.trim()?.lowercase()
                         if (!name.isNullOrEmpty()) {
                             map[name] = album.id
+                            countMap[name] = count
                         }
                         map[album.id.lowercase()] = album.id
+                        countMap[album.id.lowercase()] = count
                     }
                     albumCache = map
+                    albumAssetCountCache = countMap
                     albumCacheTime = now
+                    Log.d("ImmichManager", "Cached ${response.body()!!.size} albums from Immich")
+                } else {
+                    Log.w("ImmichManager", "Failed to fetch albums: ${response.code()} ${response.message()}")
                 }
             } catch (e: Exception) {
                 Log.w("ImmichManager", "Failed to fetch albums for name resolution: ${e.message}")
@@ -480,18 +777,78 @@ class ImmichManager(private val context: Context) {
 
         for (item in inputs) {
             val trimmed = item.trim()
+            if (trimmed.isEmpty()) continue
             val lower = trimmed.lowercase()
             val mappedId = cache[lower]
             if (mappedId != null) {
                 resolved.add(mappedId)
+                Log.d("ImmichManager", "Resolved album name '$trimmed' -> $mappedId")
             } else if (uuidRegex.matches(trimmed)) {
                 resolved.add(trimmed)
             } else {
                 val partialMatch = cache.entries.firstOrNull { it.key.contains(lower) || lower.contains(it.key) }
                 if (partialMatch != null) {
                     resolved.add(partialMatch.value)
+                    Log.d("ImmichManager", "Partially resolved album '$trimmed' -> ${partialMatch.value}")
                 } else {
                     Log.w("ImmichManager", "Could not resolve album name '$trimmed' to an ID")
+                }
+            }
+        }
+
+        return resolved.distinct()
+    }
+
+    private fun resolvePersonIds(apiService: ImmichApiService, inputs: List<String>): List<String> {
+        if (inputs.isEmpty()) return emptyList()
+
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        val needsResolution = inputs.any { !uuidRegex.matches(it.trim()) }
+
+        val now = System.currentTimeMillis()
+        if (peopleCache == null || (needsResolution && (now - peopleCacheTime > 10 * 60 * 1000L))) {
+            try {
+                val response = apiService.getPeople().execute()
+                if (response.isSuccessful && response.body() != null) {
+                    val map = mutableMapOf<String, String>()
+                    for (person in response.body()!!.people) {
+                        val name = person.name?.trim()?.lowercase()
+                        if (!name.isNullOrEmpty()) {
+                            map[name] = person.id
+                        }
+                        map[person.id.lowercase()] = person.id
+                    }
+                    peopleCache = map
+                    peopleCacheTime = now
+                    Log.d("ImmichManager", "Cached ${response.body()!!.people.size} people from Immich")
+                } else {
+                    Log.w("ImmichManager", "Failed to fetch people: ${response.code()} ${response.message()}")
+                }
+            } catch (e: Exception) {
+                Log.w("ImmichManager", "Failed to fetch people for name resolution: ${e.message}")
+            }
+        }
+
+        val cache = peopleCache ?: emptyMap()
+        val resolved = mutableListOf<String>()
+
+        for (item in inputs) {
+            val trimmed = item.trim()
+            if (trimmed.isEmpty()) continue
+            val lower = trimmed.lowercase()
+            val mappedId = cache[lower]
+            if (mappedId != null) {
+                resolved.add(mappedId)
+                Log.d("ImmichManager", "Resolved person name '$trimmed' -> $mappedId")
+            } else if (uuidRegex.matches(trimmed)) {
+                resolved.add(trimmed)
+            } else {
+                val partialMatch = cache.entries.firstOrNull { it.key.contains(lower) || lower.contains(it.key) }
+                if (partialMatch != null) {
+                    resolved.add(partialMatch.value)
+                    Log.d("ImmichManager", "Partially resolved person '$trimmed' -> ${partialMatch.value}")
+                } else {
+                    Log.w("ImmichManager", "Could not resolve person name '$trimmed' to an ID")
                 }
             }
         }
@@ -517,11 +874,7 @@ class ImmichManager(private val context: Context) {
         val isPortrait = bitmap.height > bitmap.width
 
         val blurred = if (settings.blurredBackground) {
-            try {
-                Bitmap.createScaledBitmap(bitmap, 32, 24, true)
-            } catch (_: Exception) {
-                null
-            }
+            Helpers.createBlurredBackground(bitmap)
         } else null
 
         val photoDate = if (settings.showPhotoDate) {
@@ -538,7 +891,8 @@ class ImmichManager(private val context: Context) {
             blurredBackground = blurred,
             photoDate = photoDate,
             imageLocation = location,
-            isPortrait = isPortrait
+            isPortrait = isPortrait,
+            asset = asset
         )
     }
 
@@ -570,13 +924,23 @@ class ImmichManager(private val context: Context) {
 
             val options = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.RGB_565
+                // If decoding original full resolution (often 24-48MP), downsample to prevent OOM
+                if (size == null) {
+                    inSampleSize = 2
+                }
             }
 
             val bmp = BitmapFactory.decodeStream(inputStream, null, options)
             body.close()
+            if (bmp != null) {
+                setOnlineStatus(true)
+            }
             bmp
         } catch (e: Exception) {
             Log.w("ImmichManager", "fetchBitmap error for asset $assetId: ${e.message}")
+            if (e is java.io.IOException) {
+                setOnlineStatus(false)
+            }
             null
         }
     }
@@ -607,11 +971,13 @@ class ImmichManager(private val context: Context) {
             }
 
             if (parsedDate != null) {
-                SimpleDateFormat(pattern, Locale.getDefault()).format(parsedDate)
+                val safePattern = Helpers.sanitizeDatePattern(pattern)
+                SimpleDateFormat(safePattern, Locale.getDefault()).format(parsedDate)
             } else {
                 ""
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("ImmichManager", "Failed to format photo date with pattern '$pattern': ${e.message}")
             ""
         }
     }
@@ -703,6 +1069,10 @@ class ImmichManager(private val context: Context) {
     }
 
     companion object {
+        const val PREFETCH_TARGET = 5
+        const val MIN_HISTORY_KEEP = 5
+        const val MAX_HISTORY_KEEP = 8
+
         private const val ISRG_ROOT_X1_PEM =
             "-----BEGIN CERTIFICATE-----\n" +
             "MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw\n" +

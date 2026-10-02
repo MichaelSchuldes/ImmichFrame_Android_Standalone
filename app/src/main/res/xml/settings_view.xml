@@ -37,15 +37,22 @@
         <EditTextPreference
             android:key="filter_person_ids"
             android:defaultValue=""
-            android:title="Include Person IDs"
-            android:dialogTitle="Include Person IDs"
-            android:summary="Optional comma-separated Person UUIDs to include" />
+            android:title="Include People"
+            android:dialogTitle="Include People"
+            android:summary="Comma-separated names or UUIDs of people to include" />
         <EditTextPreference
             android:key="filter_excluded_person_ids"
             android:defaultValue=""
             android:title="Exclude People"
             android:dialogTitle="Exclude People"
             android:summary="Comma-separated names or UUIDs of people to exclude" />
+        <EditTextPreference
+            android:key="filter_recent_days"
+            android:defaultValue=""
+            android:title="Only from last X days"
+            android:dialogTitle="Only from last X days"
+            android:summary="Only show photos taken in the last X days (0 or empty for all)"
+            android:inputType="number" />
         <EditTextPreference
             android:key="filter_tag_ids"
             android:defaultValue=""

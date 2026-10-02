@@ -1,4 +1,4 @@
-package com.immichframe.immichframe
+package com.immichframe.standalone
 
 import android.app.TimePickerDialog
 import android.content.Context
@@ -40,7 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.preference.PreferenceManager
-import com.immichframe.immichframe.ui.theme.ImmichFrameTheme
+import com.immichframe.standalone.ui.theme.ImmichFrameTheme
 import java.text.DateFormatSymbols
 import java.util.Locale
 
