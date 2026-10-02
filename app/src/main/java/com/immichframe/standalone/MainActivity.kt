@@ -30,7 +30,6 @@ import android.net.Uri
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.view.GestureDetector
-import android.view.ScaleGestureDetector
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -100,10 +99,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtMapZoom: TextView
     private var isCountryZoom = false
     private var currentMapZoom = MapTileHelper.ZOOM_CITY
-    private var liveScale = 1.0f
-    private var isPinchGesture = false
-    private lateinit var mapScaleDetector: ScaleGestureDetector
-    private lateinit var mapGestureDetector: GestureDetector
     private var currentGpsLat: Double? = null
     private var currentGpsLon: Double? = null
 
@@ -381,111 +376,20 @@ class MainActivity : AppCompatActivity() {
         layoutMapZoomBadge = findViewById(R.id.layoutMapZoomBadge)
         txtMapZoom = findViewById(R.id.txtMapZoom)
 
-        val scaleListener = object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                isPinchGesture = true
-                layoutMapContainer.parent?.requestDisallowInterceptTouchEvent(true)
-                return true
-            }
-
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                liveScale *= detector.scaleFactor
-                liveScale = liveScale.coerceIn(0.35f, 4.0f)
-                imgMapView.pivotX = detector.focusX
-                imgMapView.pivotY = detector.focusY
-                imgMapView.scaleX = liveScale
-                imgMapView.scaleY = liveScale
-                return true
-            }
-
-            override fun onScaleEnd(detector: ScaleGestureDetector) {
-                // Completed in ACTION_UP
-            }
-        }
-        mapScaleDetector = ScaleGestureDetector(this, scaleListener)
-
-        val mapGestureListener = object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
-
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                val lat = currentGpsLat
-                val lon = currentGpsLon
-                if (lat != null && lon != null) {
-                    if (currentMapZoom == MapTileHelper.ZOOM_CITY) {
-                        currentMapZoom = MapTileHelper.ZOOM_COUNTRY
-                        isCountryZoom = true
-                    } else if (currentMapZoom == MapTileHelper.ZOOM_COUNTRY) {
-                        currentMapZoom = MapTileHelper.ZOOM_CITY
-                        isCountryZoom = false
-                    } else {
-                        if (currentMapZoom > 9) {
-                            currentMapZoom = MapTileHelper.ZOOM_COUNTRY
-                            isCountryZoom = true
-                        } else {
-                            currentMapZoom = MapTileHelper.ZOOM_CITY
-                            isCountryZoom = false
-                        }
-                    }
-                    imgMapView.scaleX = 1f
-                    imgMapView.scaleY = 1f
-                    liveScale = 1.0f
-                    loadMap(lat, lon, currentMapZoom)
-                }
-                return true
-            }
-        }
-        mapGestureDetector = GestureDetector(this, mapGestureListener)
-
-        val mapTouchListener = View.OnTouchListener { view, event ->
-            mapScaleDetector.onTouchEvent(event)
-            mapGestureDetector.onTouchEvent(event)
-
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                view.parent?.requestDisallowInterceptTouchEvent(true)
-                liveScale = 1.0f
-                isPinchGesture = false
-            } else if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                if (isPinchGesture) {
-                    isPinchGesture = false
-                    val delta = Math.round(Math.log(liveScale.toDouble()) / Math.log(2.0)).toInt()
-                    val lat = currentGpsLat
-                    val lon = currentGpsLon
-                    if (delta != 0 && lat != null && lon != null) {
-                        val newZoom = (currentMapZoom + delta).coerceIn(2, 18)
-                        if (newZoom != currentMapZoom) {
-                            currentMapZoom = newZoom
-                            isCountryZoom = (currentMapZoom <= 8)
-                            imgMapView.scaleX = 1f
-                            imgMapView.scaleY = 1f
-                            liveScale = 1.0f
-                            loadMap(lat, lon, currentMapZoom)
-                        } else {
-                            imgMapView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
-                            liveScale = 1.0f
-                        }
-                    } else {
-                        imgMapView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
-                        liveScale = 1.0f
-                    }
-                }
-            }
-            true
-        }
-        imgMapView.setOnTouchListener(mapTouchListener)
-        layoutMapContainer.setOnTouchListener(mapTouchListener)
-
-        layoutMapZoomBadge.setOnClickListener {
+        val toggleZoomAction = View.OnClickListener {
             val lat = currentGpsLat
             val lon = currentGpsLon
             if (lat != null && lon != null) {
-                currentMapZoom = if (currentMapZoom == MapTileHelper.ZOOM_CITY) MapTileHelper.ZOOM_COUNTRY else MapTileHelper.ZOOM_CITY
-                isCountryZoom = (currentMapZoom == MapTileHelper.ZOOM_COUNTRY)
+                isCountryZoom = !isCountryZoom
+                currentMapZoom = if (isCountryZoom) MapTileHelper.ZOOM_COUNTRY else MapTileHelper.ZOOM_CITY
                 imgMapView.scaleX = 1f
                 imgMapView.scaleY = 1f
-                liveScale = 1.0f
                 loadMap(lat, lon, currentMapZoom)
             }
         }
+        imgMapView.setOnClickListener(toggleZoomAction)
+        layoutMapContainer.setOnClickListener(toggleZoomAction)
+        layoutMapZoomBadge.setOnClickListener(toggleZoomAction)
 
         infoCardContainer.setOnClickListener {
             // Absorb touches on card background so it does not dismiss overlay
@@ -993,7 +897,6 @@ class MainActivity : AppCompatActivity() {
         currentGpsLon = lon
         isCountryZoom = false // Start at city level zoom
         currentMapZoom = MapTileHelper.ZOOM_CITY
-        liveScale = 1.0f
         imgMapView.scaleX = 1f
         imgMapView.scaleY = 1f
 
