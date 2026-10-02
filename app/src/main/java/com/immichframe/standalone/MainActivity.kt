@@ -87,6 +87,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtOfflineStatus: TextView
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    private lateinit var layoutMapSection: View
+    private lateinit var txtMapLocation: TextView
+    private lateinit var layoutMapContainer: View
+    private lateinit var imgMapView: ImageView
+    private lateinit var txtMapZoom: TextView
+    private var isCountryZoom = false
+    private var currentGpsLat: Double? = null
+    private var currentGpsLon: Double? = null
+
     private lateinit var immichManager: ImmichManager
     private lateinit var currentSettings: ImmichManager.FrameSettings
     private lateinit var rcpServer: RpcHttpServer
@@ -351,6 +360,23 @@ class MainActivity : AppCompatActivity() {
         txtInfoUrl = findViewById(R.id.txtInfoUrl)
         layoutOfflineIndicator = findViewById(R.id.layoutOfflineIndicator)
         txtOfflineStatus = findViewById(R.id.txtOfflineStatus)
+
+        layoutMapSection = findViewById(R.id.layoutMapSection)
+        txtMapLocation = findViewById(R.id.txtMapLocation)
+        layoutMapContainer = findViewById(R.id.layoutMapContainer)
+        imgMapView = findViewById(R.id.imgMapView)
+        txtMapZoom = findViewById(R.id.txtMapZoom)
+
+        val toggleZoomAction = View.OnClickListener {
+            val lat = currentGpsLat
+            val lon = currentGpsLon
+            if (lat != null && lon != null) {
+                isCountryZoom = !isCountryZoom
+                loadMap(lat, lon, isCountryZoom)
+            }
+        }
+        layoutMapContainer.setOnClickListener(toggleZoomAction)
+        imgMapView.setOnClickListener(toggleZoomAction)
 
         infoOverlay.setOnClickListener {
             hideImageInfoOverlay()
@@ -787,8 +813,21 @@ class MainActivity : AppCompatActivity() {
             sb.append("📅 Date: ").append(display.photoDate).append("\n\n")
         }
 
-        if (display.imageLocation.isNotBlank()) {
-            sb.append("📍 Location: ").append(display.imageLocation).append("\n\n")
+        val city = exif?.city?.trim()
+        val country = exif?.country?.trim()
+        val state = exif?.state?.trim()
+
+        val locationString = when {
+            !city.isNullOrEmpty() && !country.isNullOrEmpty() -> "$city, $country"
+            !city.isNullOrEmpty() && !state.isNullOrEmpty() -> "$city, $state"
+            !city.isNullOrEmpty() -> city
+            !country.isNullOrEmpty() -> country
+            display.imageLocation.isNotBlank() -> display.imageLocation
+            else -> ""
+        }
+
+        if (locationString.isNotBlank()) {
+            sb.append("📍 Location: ").append(locationString).append("\n\n")
         }
 
         val peopleNames = asset?.people?.mapNotNull { it.name?.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
@@ -833,9 +872,45 @@ class MainActivity : AppCompatActivity() {
         txtInfoDetails.text = sb.toString().trim()
         txtInfoTitle.text = if (!asset?.originalFileName.isNullOrBlank()) asset.originalFileName else "Photo Details"
 
+        // Map and GPS Handling
+        val lat = exif?.latitude
+        val lon = exif?.longitude
+        currentGpsLat = lat
+        currentGpsLon = lon
+        isCountryZoom = false // Start at city level zoom
+
+        if (lat != null && lon != null && (lat != 0.0 || lon != 0.0)) {
+            layoutMapSection.visibility = View.VISIBLE
+            txtMapLocation.text = if (locationString.isNotBlank()) locationString else String.format(Locale.US, "%.4f°, %.4f°", lat, lon)
+            loadMap(lat, lon, isCountryZoom)
+        } else {
+            layoutMapSection.visibility = View.GONE
+        }
+
         infoOverlay.visibility = View.VISIBLE
         infoOverlay.alpha = 0f
         infoOverlay.animate().alpha(1f).setDuration(250).start()
+    }
+
+    private fun loadMap(lat: Double, lon: Double, isCountry: Boolean) {
+        if (!::imgMapView.isInitialized) return
+        val zoom = if (isCountry) MapTileHelper.ZOOM_COUNTRY else MapTileHelper.ZOOM_CITY
+        txtMapZoom.text = if (isCountry) "Country view · Tap for city" else "City view · Tap for country"
+
+        lifecycleScope.launch {
+            val density = resources.displayMetrics.density
+            val widthPx = (300 * density).toInt()
+            val heightPx = (180 * density).toInt()
+            val mapBitmap = MapTileHelper.renderMap(
+                lat = lat,
+                lon = lon,
+                zoom = zoom,
+                widthPx = widthPx,
+                heightPx = heightPx,
+                client = immichManager.okHttpClient
+            )
+            imgMapView.setImageBitmap(mapBitmap)
+        }
     }
 
     private fun hideImageInfoOverlay() {

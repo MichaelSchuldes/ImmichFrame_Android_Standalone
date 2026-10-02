@@ -31,6 +31,8 @@ data class ImmichExifInfo(
     @SerializedName("iso") val iso: Int? = null,
     @SerializedName("exposureTime") val exposureTime: String? = null,
     @SerializedName("fileSizeInByte") val fileSizeInByte: Long? = null,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null,
     @SerializedName("city") val city: String? = null,
     @SerializedName("state") val state: String? = null,
     @SerializedName("country") val country: String? = null,

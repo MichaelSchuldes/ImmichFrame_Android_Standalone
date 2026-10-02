@@ -100,7 +100,7 @@ class ImmichManager(private val context: Context) {
     @Volatile
     private var lastApiKey: String = ""
 
-    private val okHttpClient: OkHttpClient = buildOkHttpClient()
+    val okHttpClient: OkHttpClient = buildOkHttpClient()
 
     fun getSettings(): FrameSettings {
         val prefs: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)

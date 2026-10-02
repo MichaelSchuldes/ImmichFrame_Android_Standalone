@@ -184,13 +184,13 @@
                         android:layout_toStartOf="@+id/btnInfoClose"
                         android:text="Photo Details"
                         android:textColor="#FFFFFF"
-                        android:textSize="18sp"
+                        android:textSize="22sp"
                         android:textStyle="bold" />
 
                     <ImageButton
                         android:id="@+id/btnInfoClose"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
                         android:layout_alignParentEnd="true"
                         android:layout_centerVertical="true"
                         android:background="?attr/selectableItemBackgroundBorderless"
@@ -227,24 +227,113 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
                             android:text="Scan to open in Immich"
-                            android:textColor="#AAAAAA"
-                            android:textSize="12sp"
+                            android:textColor="#CCCCCC"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
                             android:gravity="center" />
                     </LinearLayout>
 
                     <ScrollView
                         android:layout_width="320dp"
                         android:layout_height="wrap_content"
-                        android:maxHeight="300dp">
+                        android:maxHeight="320dp">
 
                         <TextView
                             android:id="@+id/txtInfoDetails"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:lineSpacingExtra="4dp"
-                            android:textColor="#E0E0E0"
-                            android:textSize="13sp" />
+                            android:lineSpacingExtra="5dp"
+                            android:textColor="#EDEDED"
+                            android:textSize="16sp" />
                     </ScrollView>
+
+                    <!-- Column 3: Interactive Map with GPS Pin and City/Country -->
+                    <LinearLayout
+                        android:id="@+id/layoutMapSection"
+                        android:layout_width="300dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="20dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <!-- Location Header: City and Country -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="8dp">
+
+                            <ImageView
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:layout_marginEnd="6dp"
+                                android:src="@drawable/ic_place_pin"
+                                android:tint="#E53935"
+                                android:contentDescription="Map Pin" />
+
+                            <TextView
+                                android:id="@+id/txtMapLocation"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="City, Country"
+                                android:textColor="#FFFFFF"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:singleLine="true"
+                                android:ellipsize="end" />
+                        </LinearLayout>
+
+                        <!-- Map Container (Clickable to switch between city and country zoom) -->
+                        <FrameLayout
+                            android:id="@+id/layoutMapContainer"
+                            android:layout_width="300dp"
+                            android:layout_height="180dp"
+                            android:background="@drawable/bg_qr_frame"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <ImageView
+                                android:id="@+id/imgMapView"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scaleType="centerCrop"
+                                android:contentDescription="Photo Location Map" />
+
+                            <!-- Zoom Mode Badge in bottom-right corner -->
+                            <LinearLayout
+                                android:id="@+id/layoutMapZoomBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="bottom|end"
+                                android:layout_margin="8dp"
+                                android:background="@drawable/bg_text_overlay"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:paddingTop="3dp"
+                                android:paddingBottom="3dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:id="@+id/txtMapZoom"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="City view · Tap for country"
+                                    android:textColor="#FFFFFF"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+                        </FrameLayout>
+
+                        <TextView
+                            android:id="@+id/txtMapHint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="Tap map to switch between city and country"
+                            android:textColor="#888888"
+                            android:textSize="11sp"
+                            android:gravity="center" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <TextView
@@ -253,7 +342,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:textColor="#64B5F6"
-                    android:textSize="11sp"
+                    android:textSize="13sp"
                     android:gravity="center"
                     android:ellipsize="middle"
                     android:singleLine="true" />
