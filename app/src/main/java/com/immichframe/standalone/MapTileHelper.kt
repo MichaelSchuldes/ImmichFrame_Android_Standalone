@@ -27,8 +27,8 @@ object MapTileHelper {
     const val ZOOM_CITY = 12
     const val ZOOM_COUNTRY = 6
 
-    // In-memory cache for tile bitmaps (keeps up to 80 tiles)
-    private val tileMemoryCache = object : LruCache<String, Bitmap>(80) {
+    // In-memory cache for tile bitmaps (keeps up to 150 tiles)
+    private val tileMemoryCache = object : LruCache<String, Bitmap>(150) {
         override fun sizeOf(key: String, value: Bitmap): Int = 1
     }
 
@@ -70,8 +70,9 @@ object MapTileHelper {
         // 2. Slippy tile math
         val safeLat = lat.coerceIn(-85.0511, 85.0511)
         val safeLon = lon.coerceIn(-180.0, 180.0)
+        val safeZoom = zoom.coerceIn(1, 19)
 
-        val n = 2.0.pow(zoom.toDouble())
+        val n = 2.0.pow(safeZoom.toDouble())
         val xExact = (safeLon + 180.0) / 360.0 * n
         val latRad = Math.toRadians(safeLat)
         val yExact = (1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0 * n
@@ -90,7 +91,7 @@ object MapTileHelper {
         val minTileY = floor(yExact - (screenCenterY / TILE_SIZE)).toInt() - 1
         val maxTileY = floor(yExact + ((heightPx - screenCenterY) / TILE_SIZE)).toInt() + 1
 
-        val maxTileIdx = (1 shl zoom) - 1
+        val maxTileIdx = (1 shl safeZoom) - 1
 
         // 3. Download and composite tiles
         val tilePaint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -98,7 +99,7 @@ object MapTileHelper {
             if (ty < 0 || ty > maxTileIdx) continue
             for (tx in minTileX..maxTileX) {
                 val normalizedTx = ((tx % (maxTileIdx + 1)) + (maxTileIdx + 1)) % (maxTileIdx + 1)
-                val tileBmp = getTile(zoom, normalizedTx, ty, client)
+                val tileBmp = getTile(safeZoom, normalizedTx, ty, client)
                 if (tileBmp != null && !tileBmp.isRecycled) {
                     val drawX = (screenCenterX - subTileX + (tx - centerTileX) * TILE_SIZE).toFloat()
                     val drawY = (screenCenterY - subTileY + (ty - centerTileY) * TILE_SIZE).toFloat()

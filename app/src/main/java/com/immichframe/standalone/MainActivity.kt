@@ -28,7 +28,9 @@ import android.net.Network
 import android.net.NetworkRequest
 import android.net.Uri
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.view.GestureDetector
+import android.view.ScaleGestureDetector
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -89,12 +91,19 @@ class MainActivity : AppCompatActivity() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private lateinit var infoContentRow: LinearLayout
+    private lateinit var scrollInfoDetails: ScrollView
     private lateinit var layoutMapSection: LinearLayout
     private lateinit var txtMapLocation: TextView
     private lateinit var layoutMapContainer: FrameLayout
     private lateinit var imgMapView: ImageView
+    private lateinit var layoutMapZoomBadge: LinearLayout
     private lateinit var txtMapZoom: TextView
     private var isCountryZoom = false
+    private var currentMapZoom = MapTileHelper.ZOOM_CITY
+    private var liveScale = 1.0f
+    private var isPinchGesture = false
+    private lateinit var mapScaleDetector: ScaleGestureDetector
+    private lateinit var mapGestureDetector: GestureDetector
     private var currentGpsLat: Double? = null
     private var currentGpsLon: Double? = null
 
@@ -360,6 +369,7 @@ class MainActivity : AppCompatActivity() {
         btnInfoClose = findViewById(R.id.btnInfoClose)
         imgQrCode = findViewById(R.id.imgQrCode)
         txtInfoDetails = findViewById(R.id.txtInfoDetails)
+        scrollInfoDetails = findViewById(R.id.scrollInfoDetails)
         txtInfoUrl = findViewById(R.id.txtInfoUrl)
         layoutOfflineIndicator = findViewById(R.id.layoutOfflineIndicator)
         txtOfflineStatus = findViewById(R.id.txtOfflineStatus)
@@ -368,18 +378,118 @@ class MainActivity : AppCompatActivity() {
         txtMapLocation = findViewById(R.id.txtMapLocation)
         layoutMapContainer = findViewById(R.id.layoutMapContainer)
         imgMapView = findViewById(R.id.imgMapView)
+        layoutMapZoomBadge = findViewById(R.id.layoutMapZoomBadge)
         txtMapZoom = findViewById(R.id.txtMapZoom)
 
-        val toggleZoomAction = View.OnClickListener {
+        val scaleListener = object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                isPinchGesture = true
+                layoutMapContainer.parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                liveScale *= detector.scaleFactor
+                liveScale = liveScale.coerceIn(0.35f, 4.0f)
+                imgMapView.pivotX = detector.focusX
+                imgMapView.pivotY = detector.focusY
+                imgMapView.scaleX = liveScale
+                imgMapView.scaleY = liveScale
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                // Completed in ACTION_UP
+            }
+        }
+        mapScaleDetector = ScaleGestureDetector(this, scaleListener)
+
+        val mapGestureListener = object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val lat = currentGpsLat
+                val lon = currentGpsLon
+                if (lat != null && lon != null) {
+                    if (currentMapZoom == MapTileHelper.ZOOM_CITY) {
+                        currentMapZoom = MapTileHelper.ZOOM_COUNTRY
+                        isCountryZoom = true
+                    } else if (currentMapZoom == MapTileHelper.ZOOM_COUNTRY) {
+                        currentMapZoom = MapTileHelper.ZOOM_CITY
+                        isCountryZoom = false
+                    } else {
+                        if (currentMapZoom > 9) {
+                            currentMapZoom = MapTileHelper.ZOOM_COUNTRY
+                            isCountryZoom = true
+                        } else {
+                            currentMapZoom = MapTileHelper.ZOOM_CITY
+                            isCountryZoom = false
+                        }
+                    }
+                    imgMapView.scaleX = 1f
+                    imgMapView.scaleY = 1f
+                    liveScale = 1.0f
+                    loadMap(lat, lon, currentMapZoom)
+                }
+                return true
+            }
+        }
+        mapGestureDetector = GestureDetector(this, mapGestureListener)
+
+        val mapTouchListener = View.OnTouchListener { view, event ->
+            mapScaleDetector.onTouchEvent(event)
+            mapGestureDetector.onTouchEvent(event)
+
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+                liveScale = 1.0f
+                isPinchGesture = false
+            } else if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                if (isPinchGesture) {
+                    isPinchGesture = false
+                    val delta = Math.round(Math.log(liveScale.toDouble()) / Math.log(2.0)).toInt()
+                    val lat = currentGpsLat
+                    val lon = currentGpsLon
+                    if (delta != 0 && lat != null && lon != null) {
+                        val newZoom = (currentMapZoom + delta).coerceIn(2, 18)
+                        if (newZoom != currentMapZoom) {
+                            currentMapZoom = newZoom
+                            isCountryZoom = (currentMapZoom <= 8)
+                            imgMapView.scaleX = 1f
+                            imgMapView.scaleY = 1f
+                            liveScale = 1.0f
+                            loadMap(lat, lon, currentMapZoom)
+                        } else {
+                            imgMapView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
+                            liveScale = 1.0f
+                        }
+                    } else {
+                        imgMapView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
+                        liveScale = 1.0f
+                    }
+                }
+            }
+            true
+        }
+        imgMapView.setOnTouchListener(mapTouchListener)
+        layoutMapContainer.setOnTouchListener(mapTouchListener)
+
+        layoutMapZoomBadge.setOnClickListener {
             val lat = currentGpsLat
             val lon = currentGpsLon
             if (lat != null && lon != null) {
-                isCountryZoom = !isCountryZoom
-                loadMap(lat, lon, isCountryZoom)
+                currentMapZoom = if (currentMapZoom == MapTileHelper.ZOOM_CITY) MapTileHelper.ZOOM_COUNTRY else MapTileHelper.ZOOM_CITY
+                isCountryZoom = (currentMapZoom == MapTileHelper.ZOOM_COUNTRY)
+                imgMapView.scaleX = 1f
+                imgMapView.scaleY = 1f
+                liveScale = 1.0f
+                loadMap(lat, lon, currentMapZoom)
             }
         }
-        layoutMapContainer.setOnClickListener(toggleZoomAction)
-        imgMapView.setOnClickListener(toggleZoomAction)
+
+        infoCardContainer.setOnClickListener {
+            // Absorb touches on card background so it does not dismiss overlay
+        }
 
         infoOverlay.setOnClickListener {
             hideImageInfoOverlay()
@@ -791,6 +901,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showImageInfoOverlay() {
+        stopImageTimer()
         val display = currentImage ?: return
         val serverUrl = currentSettings.serverUrl.trimEnd('/')
         val photoUrl = if (serverUrl.isNotBlank()) "$serverUrl/photos/${display.assetId}" else "https://my.immich.app/photos/${display.assetId}"
@@ -881,15 +992,20 @@ class MainActivity : AppCompatActivity() {
         currentGpsLat = lat
         currentGpsLon = lon
         isCountryZoom = false // Start at city level zoom
+        currentMapZoom = MapTileHelper.ZOOM_CITY
+        liveScale = 1.0f
+        imgMapView.scaleX = 1f
+        imgMapView.scaleY = 1f
 
+        val hasGps = (lat != null && lon != null && (lat != 0.0 || lon != 0.0))
         val isVertical = isScreenVertical()
-        updateOverlayOrientation(isVertical)
+        updateOverlayOrientation(isVertical, hasGps)
 
-        if (lat != null && lon != null && (lat != 0.0 || lon != 0.0)) {
+        if (hasGps) {
             layoutMapSection.visibility = View.VISIBLE
-            txtMapLocation.text = if (locationString.isNotBlank()) locationString else String.format(Locale.US, "%.4f°, %.4f°", lat, lon)
+            txtMapLocation.text = if (locationString.isNotBlank()) locationString else String.format(Locale.US, "%.4f°, %.4f°", lat!!, lon!!)
             layoutMapContainer.post {
-                loadMap(lat, lon, isCountryZoom)
+                loadMap(lat, lon, currentMapZoom)
             }
         } else {
             layoutMapSection.visibility = View.GONE
@@ -908,12 +1024,36 @@ class MainActivity : AppCompatActivity() {
         return decorView.height > decorView.width
     }
 
-    private fun updateOverlayOrientation(isVertical: Boolean) {
+    private fun updateOverlayOrientation(isVertical: Boolean, hasGps: Boolean) {
         if (!::layoutMapSection.isInitialized || !::infoCardContainer.isInitialized || !::infoContentRow.isInitialized) return
         val density = resources.displayMetrics.density
 
+        // When photo has GPS map, fill almost the full screen to give the map maximum space
+        if (hasGps) {
+            val margin = (16 * density).toInt()
+            val lp = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ).apply {
+                setMargins(margin, margin, margin, margin)
+                gravity = Gravity.CENTER
+            }
+            infoCardContainer.layoutParams = lp
+        } else {
+            val margin = (24 * density).toInt()
+            val lp = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(margin, margin, margin, margin)
+                gravity = Gravity.CENTER
+            }
+            infoCardContainer.layoutParams = lp
+        }
+
         if (isVertical) {
             // In vertical orientation: place the map below the info text / QR row
+            // layoutMapSection gets weight=1 to fill all remaining screen height!
             if (layoutMapSection.parent == infoContentRow) {
                 infoContentRow.removeView(layoutMapSection)
             }
@@ -921,47 +1061,86 @@ class MainActivity : AppCompatActivity() {
                 val index = infoCardContainer.indexOfChild(infoContentRow) + 1
                 val params = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
+                    0,
+                    1f
                 ).apply {
-                    topMargin = (14 * density).toInt()
+                    topMargin = (10 * density).toInt()
                     marginStart = 0
                 }
                 infoCardContainer.addView(layoutMapSection, index, params)
             } else {
-                (layoutMapSection.layoutParams as? LinearLayout.LayoutParams)?.apply {
-                    width = LinearLayout.LayoutParams.MATCH_PARENT
-                    topMargin = (14 * density).toInt()
+                layoutMapSection.layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                ).apply {
+                    topMargin = (10 * density).toInt()
                     marginStart = 0
                 }
             }
+
+            infoContentRow.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+
+            scrollInfoDetails.layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply {
+                marginStart = (14 * density).toInt()
+            }
+
             layoutMapContainer.layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                (200 * density).toInt()
+                0,
+                1f
             )
         } else {
             // In landscape orientation: place the map inside infoContentRow to the right of info text
+            // infoContentRow gets weight=1, and layoutMapSection gets weight=1 to fill all remaining space!
             if (layoutMapSection.parent == infoCardContainer) {
                 infoCardContainer.removeView(layoutMapSection)
             }
             if (layoutMapSection.parent != infoContentRow) {
                 val params = LinearLayout.LayoutParams(
-                    (300 * density).toInt(),
-                    LinearLayout.LayoutParams.WRAP_CONTENT
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    1f
                 ).apply {
-                    marginStart = (20 * density).toInt()
+                    marginStart = (16 * density).toInt()
                     topMargin = 0
                 }
                 infoContentRow.addView(layoutMapSection, params)
             } else {
-                (layoutMapSection.layoutParams as? LinearLayout.LayoutParams)?.apply {
-                    width = (300 * density).toInt()
-                    marginStart = (20 * density).toInt()
+                layoutMapSection.layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    1f
+                ).apply {
+                    marginStart = (16 * density).toInt()
                     topMargin = 0
                 }
             }
+
+            infoContentRow.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+
+            scrollInfoDetails.layoutParams = LinearLayout.LayoutParams(
+                (320 * density).toInt(),
+                LinearLayout.LayoutParams.MATCH_PARENT
+            ).apply {
+                marginStart = (14 * density).toInt()
+            }
+
             layoutMapContainer.layoutParams = LinearLayout.LayoutParams(
-                (300 * density).toInt(),
-                (180 * density).toInt()
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
             )
         }
     }
@@ -970,27 +1149,31 @@ class MainActivity : AppCompatActivity() {
         super.onConfigurationChanged(newConfig)
         if (::infoOverlay.isInitialized && infoOverlay.visibility == View.VISIBLE) {
             val isVertical = newConfig.orientation == Configuration.ORIENTATION_PORTRAIT
-            updateOverlayOrientation(isVertical)
             val lat = currentGpsLat
             val lon = currentGpsLon
-            if (lat != null && lon != null && (lat != 0.0 || lon != 0.0)) {
+            val hasGps = (lat != null && lon != null && (lat != 0.0 || lon != 0.0))
+            updateOverlayOrientation(isVertical, hasGps)
+            if (hasGps) {
                 layoutMapContainer.post {
-                    loadMap(lat, lon, isCountryZoom)
+                    loadMap(lat!!, lon!!, currentMapZoom)
                 }
             }
         }
     }
 
-    private fun loadMap(lat: Double, lon: Double, isCountry: Boolean) {
+    private fun loadMap(lat: Double, lon: Double, zoom: Int) {
         if (!::imgMapView.isInitialized) return
-        val zoom = if (isCountry) MapTileHelper.ZOOM_COUNTRY else MapTileHelper.ZOOM_CITY
-        txtMapZoom.text = if (isCountry) "Country view · Tap for city" else "City view · Tap for country"
+        txtMapZoom.text = when (zoom) {
+            MapTileHelper.ZOOM_CITY -> "City view · Tap for country"
+            MapTileHelper.ZOOM_COUNTRY -> "Country view · Tap for city"
+            else -> if (zoom > 9) "Zoom $zoom · Tap for country" else "Zoom $zoom · Tap for city"
+        }
 
         lifecycleScope.launch {
             val density = resources.displayMetrics.density
             val isVertical = isScreenVertical()
-            val fallbackWidthDp = if (isVertical) 500 else 300
-            val fallbackHeightDp = if (isVertical) 200 else 180
+            val fallbackWidthDp = if (isVertical) 700 else 600
+            val fallbackHeightDp = if (isVertical) 800 else 500
             val widthPx = if (layoutMapContainer.width > 0) layoutMapContainer.width else (fallbackWidthDp * density).toInt()
             val heightPx = if (layoutMapContainer.height > 0) layoutMapContainer.height else (fallbackHeightDp * density).toInt()
 
@@ -1008,6 +1191,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideImageInfoOverlay() {
         if (!::infoOverlay.isInitialized || infoOverlay.visibility != View.VISIBLE) return
+        startImageTimer()
         infoOverlay.animate()
             .alpha(0f)
             .setDuration(200)
@@ -1018,6 +1202,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (::infoOverlay.isInitialized && infoOverlay.visibility == View.VISIBLE) {
+            return super.dispatchTouchEvent(ev)
+        }
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             isFlingHandled = false
         }
