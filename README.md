@@ -105,6 +105,53 @@ Ensure ADB is installed and developer options / USB debugging is enabled on your
    adb push immichframe_settings.json /sdcard/immichframe_settings.json
    ```
 
+### 🔌 Troubleshooting: Device Not Showing Up in ADB
+
+If your device is plugged in via USB or connected over Wi-Fi but does not show up when running `adb devices`:
+
+1. **Verify Developer Options & USB Debugging**:
+   - On the device, navigate to **Settings > About tablet**.
+   - Tap **Build number** 7 times rapidly until *"You are now a developer!"* appears.
+   - Go to **Settings > Developer options** and ensure **USB debugging** is toggled **ON**.
+   - When connecting to the computer, accept the authorization prompt on the device screen (check *"Always allow from this computer"* and tap **OK**).
+
+2. **Restart the ADB Server Correctly**:
+   The host ADB background daemon frequently holds onto stale device socket states when cables are unplugged or different devices are attached. Restarting the daemon forces an immediate fresh bus and transport scan:
+   ```bash
+   adb kill-server
+   adb devices -l
+   ```
+   If the ADB daemon is unresponsive or hung:
+   ```bash
+   pkill -9 adb
+   adb start-server
+   adb devices -l
+   ```
+
+3. **Verify Physical USB Connection on Linux (`lsusb`)**:
+   Verify whether the host Linux kernel detects the USB hardware:
+   ```bash
+   lsusb
+   ```
+   *(For instance, Rockchip-based frames typically appear as `2207:0006 ... Fuzhou Rockchip Electronics Company Frame`)*.
+
+4. **Fix Linux USB Permissions (udev rules)**:
+   If `adb devices` lists the device as `???????????? no permissions` or doesn't detect it due to non-root USB access:
+   ```bash
+   # Add udev rule for Rockchip and Android devices
+   echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2207", MODE="0666", GROUP="plugdev"' | sudo tee /etc/udev/rules.d/51-android.rules
+   sudo udevadm control --reload-rules && sudo udevadm trigger
+   adb kill-server && adb devices -l
+   ```
+
+5. **Targeting Specific Devices (When Multiple Devices are Attached)**:
+   If more than one frame or phone is connected:
+   ```bash
+   adb devices
+   # Use the -s flag followed by the device serial number:
+   adb -s <SERIAL> install -r app/build/outputs/apk/debug/immichframe-standalone-debug.apk
+   ```
+
 ---
 
 ## ▶️ How to Launch via ADB
